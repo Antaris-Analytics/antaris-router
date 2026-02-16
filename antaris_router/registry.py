@@ -283,8 +283,8 @@ class ModelRegistry:
             data['models'].append(model_data)
         
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(file_path, data)
     
     def load_from_file(self, file_path: str) -> None:
         """Load registry from a JSON file.

@@ -124,8 +124,8 @@ class AdaptiveRouter:
             },
             'ab_test_rate': self.ab_test_rate,
         }
-        with open(self._config_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(self._config_path, data)
 
     def route(self, prompt: str, context: Dict = None,
               optimize: str = "balanced") -> RoutingResult:

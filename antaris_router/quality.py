@@ -61,10 +61,9 @@ class QualityTracker:
         """Persist tracking data to disk."""
         os.makedirs(self.workspace, exist_ok=True)
         
-        with open(self._decisions_path, 'w') as f:
-            json.dump(self.decisions, f, indent=2)
-        with open(self._profiles_path, 'w') as f:
-            json.dump(self.profiles, f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(self._decisions_path, self.decisions)
+        atomic_write_json(self._profiles_path, self.profiles)
 
     def record(self, decision: RoutingDecision):
         """Record a routing decision."""

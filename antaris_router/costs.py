@@ -322,8 +322,8 @@ class CostTracker:
         }
         
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
-        with open(self.storage_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(self.storage_path, data)
     
     def load(self) -> None:
         """Load usage history from storage file."""

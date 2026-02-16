@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback routing to higher tiers when needed
 - Model efficiency analysis
 - Cost optimization with automatic cheapest-model selection
-- Thread-safe operations
+- Single-process safe operations (concurrent writer locking planned for future release)
 - Configurable classification rules and model definitions
 
 ## [0.3.0] - 2026-02-15

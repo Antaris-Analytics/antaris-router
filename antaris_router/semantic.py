@@ -324,11 +324,9 @@ class SemanticClassifier:
         """Persist examples and model to disk."""
         os.makedirs(self.workspace, exist_ok=True)
         
-        with open(self._examples_path, 'w') as f:
-            json.dump(self.examples, f, indent=2)
-        
-        with open(self._model_path, 'w') as f:
-            json.dump(self.vectorizer.to_dict(), f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(self._examples_path, self.examples)
+        atomic_write_json(self._model_path, self.vectorizer.to_dict())
 
     def _load(self):
         """Load saved examples and model."""

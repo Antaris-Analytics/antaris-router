@@ -79,8 +79,8 @@ class Config:
         """
         os.makedirs(config_path, exist_ok=True)
         config_file = os.path.join(config_path, 'config.json')
-        with open(config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
+        from .utils import atomic_write_json
+        atomic_write_json(config_file, self.config)
     
     def add_model(self, model_def: Dict[str, Any]) -> None:
         """Add or update a model definition.
