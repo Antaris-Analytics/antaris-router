@@ -177,8 +177,12 @@ class AdaptiveRouter:
                 reasoning.append(f"Skipping {model_name} (poor quality history on {tier})")
         
         if not filtered:
-            filtered = eligible  # Don't filter everything out
-            reasoning.append("All models have poor history; using all eligible")
+            # Prefer models with no data (neutral 0.5) over models with bad data
+            # Sort eligible by score descending — untested models rank higher than failed ones
+            filtered = sorted(eligible, 
+                            key=lambda m: self.tracker.get_model_score(m, tier),
+                            reverse=True)
+            reasoning.append("All models have poor history; preferring least-bad option")
         
         # Step 5: Select best model based on optimization goal
         if len(filtered) == 1:

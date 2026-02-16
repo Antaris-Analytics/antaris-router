@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+
+## [2.0.0] - 2026-02-16
+
+### Added (Complete Routing Rewrite)
+- **Semantic Classification** (`SemanticClassifier`): TF-IDF vectorizer + cosine similarity replaces keyword matching
+- **TF-IDF Vectorizer** (`TFIDFVectorizer`): Lightweight implementation using only stdlib — tokenization, IDF computation, cosine similarity
+- **Quality Tracking** (`QualityTracker`): Records routing decisions and outcomes, builds per-model per-tier quality profiles
+- **Adaptive Router** (`AdaptiveRouter`): Combines semantic classification, quality learning, fallback chains, A/B testing, and context-aware routing
+- **Outcome Learning**: `report_outcome()` feeds quality data back to improve future routing
+- **A/B Testing**: Configurable percentage of requests routed to premium for validation
+- **Context-Aware Routing**: Iteration count, conversation length, user expertise affect tier selection
+- **Fallback Chains**: Ordered model escalation with `escalate()` method
+- **Multi-Objective Optimization**: Route by quality, cost, speed, or balanced
+- **Teaching API**: `teach()` permanently corrects classification mistakes
+- 50+ seed classification examples across 5 tiers
+- 33 new tests for v2.0 features (67 total)
+
+### Changed
+- Default classification method is now semantic (TF-IDF) instead of keyword matching
+- Version bumped to 2.0.0 (breaking: new primary API)
+
+### Migration
+- Legacy v1 API (`Router`, `TaskClassifier`) still available and unchanged
+- New API uses `AdaptiveRouter` and `ModelConfig`
+- `pip install antaris-router` gets both APIs
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] - 2026-02-15

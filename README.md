@@ -1,70 +1,59 @@
 # Antaris Router
 
-**Deterministic model routing for 50-70% LLM cost reduction. Zero dependencies.**
+**Adaptive model router for LLM applications. Learns from outcomes. Zero dependencies.**
 
-File-based prompt classification that routes to the cheapest capable model. Same input always produces the same routing decision. No API calls for classification, no vector databases, no infrastructure overhead.
+Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. All state stored in plain JSON files.
 
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/Antaris-Analytics/antaris-router)
+[![PyPI](https://img.shields.io/pypi/v/antaris-router)](https://pypi.org/project/antaris-router/)
+[![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)](https://github.com/Antaris-Analytics/antaris-router)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
-## Cost Impact
-
-**Live test results (5 diverse prompts):**
-
-```
-Prompt                          Tier     Routed Model       Cost      Realistic Mix*
-"Hi there!"                    trivial   gpt-4o-mini       $0.000016    $0.025000
-"What is machine learning?"    trivial   gpt-4o-mini       $0.000016    $0.080000  
-"Explain microservices..."     simple    llama-3-1-70b     $0.000000    $0.200000
-"React component with TS..."   simple    llama-3-1-70b     $0.000000    $0.400000
-"Design distributed system..." expert    gemini-pro-1-5    $0.004375    $3.000000
-
-Total cost:           $0.0044      vs      $3.705
-Monthly (10k reqs):   $8.82       vs      $7,410.00
-Savings:              $7,401.18 (99.9%) → More realistic: ~70%
-```
-
-***Realistic mix:** 60% mid-tier models (GPT-4o, Claude Sonnet), 30% cheap (4o-mini), 10% expensive (Opus)*
-
-**Key insight:** Even against realistic usage patterns, deterministic routing delivers substantial cost savings.
-
-## How It Works
-
-1. **Classify** prompts using deterministic keyword matching + structural analysis
-2. **Route** to cheapest model in each capability tier (trivial → simple → moderate → complex → expert)
-3. **Track** actual usage costs and compare against premium-only baseline
-4. **Optimize** spending while maintaining output quality
-
-All routing decisions happen offline using plain text rules stored in JSON files.
-
 ## What It Does
 
-- Prompt complexity classification (5 tiers: trivial → expert)
-- Cost-optimized model selection within each tier  
-- Usage tracking with savings estimates vs. premium models
-- Provider preferences and capability-based routing
-- Deterministic decisions — same prompt always routes the same way
+- **Semantic classification** — TF-IDF vectors + cosine similarity, not keyword matching
+- **Outcome learning** — tracks routing decisions and their results, builds per-model quality profiles
+- **Fallback chains** — automatic escalation when cheap models fail
+- **A/B testing** — routes a configurable % to premium models to validate cheap routing
+- **Context-aware** — adjusts routing based on iteration count, conversation length, user expertise
+- **Multi-objective** — optimize for quality, cost, speed, or balanced
+- Runs fully offline — zero network calls, zero tokens, zero API keys
+
+## Demo
+
+```
+Prompt                                                          Tier       Model
+──────────────────────────────────────────────────────────────────────────────────
+What is 2 + 2?                                                  trivial    gpt-4o-mini
+Translate hello to French                                       trivial    gpt-4o-mini
+Write a Python function to reverse a string                     simple     gpt-4o-mini
+Implement a React component with sortable table and pagination  moderate   claude-sonnet
+Write a class that manages a connection pool with retry logic   moderate   claude-sonnet
+Design microservices for e-commerce with 10K users and CQRS     complex    claude-sonnet
+Fix this bug (iteration 1)                                      trivial    gpt-4o-mini
+Fix this bug (iteration 5)                                      simple     claude-sonnet
+```
+
+Note: "Implement a React component" routes to **moderate**, not trivial. The semantic classifier understands that implementation tasks require real capability, regardless of prompt length.
+
+## Performance
+
+```
+Routing latency (100 calls): median 0.04ms, p99 0.17ms
+Classification: ~50 seed examples across 5 tiers, TF-IDF with cosine similarity
+Memory: <5MB for typical workloads
+Storage: 3 JSON files (examples, model, decisions)
+```
+
+Measured on Apple M4, Python 3.14. Your numbers will vary.
 
 ## What It Doesn't Do
 
-- **API proxy** — Returns routing decisions only, you make the actual calls
-- **Semantic analysis** — Uses keyword matching, not embeddings or model inference  
-- **Learning system** — Rules are static, doesn't adapt based on outcomes
-- **Rate limiting** — Handles routing logic only, not request management
-- **Quality assessment** — Assumes all models in a tier produce equivalent results
-
-## Technical Approach
-
-Same principles as [antaris-memory](https://github.com/Antaris-Analytics/antaris-memory):
-
-| Principle | Implementation |
-|-----------|----------------|
-| **File-based** | JSON config files. No databases, no external services. |  
-| **Deterministic** | Identical inputs produce identical routing decisions. |
-| **Offline-first** | Classification runs locally using keyword matching. |
-| **Zero dependencies** | Pure Python stdlib. No vendor lock-in. |
-| **Transparent** | Inspect routing rules with any text editor. |
+- **Not a proxy** — doesn't forward requests to models. It tells you *which* model to use.
+- **Not semantic search** — no embeddings, no vector DB. Uses TF-IDF (bag-of-words with term weighting).
+- **Not real-time market data** — doesn't track live model pricing or availability.
+- **Classification is statistical, not perfect** — edge cases exist. Use `teach()` to correct them.
+- **Quality tracking requires your feedback** — call `report_outcome()` after using the model, or the router can't learn.
 
 ## Install
 
@@ -72,207 +61,211 @@ Same principles as [antaris-memory](https://github.com/Antaris-Analytics/antaris
 pip install antaris-router
 ```
 
-## Usage
+## Quick Start
 
 ```python
-from antaris_router import Router
+from antaris_router import AdaptiveRouter, ModelConfig
 
-# Initialize with default config  
-router = Router()
+router = AdaptiveRouter("./routing_data")
 
-# Route prompts to appropriate models
-simple_q = router.route("What is Python?")
-# → gpt-4o-mini ($0.15/MTok) instead of gpt-4o ($2.50/MTok)
+# Register your models with their capability ranges
+router.register_model(ModelConfig(
+    name="gpt-4o-mini",
+    tier_range=("trivial", "moderate"),
+    cost_per_1k_input=0.00015,
+    cost_per_1k_output=0.0006,
+))
+router.register_model(ModelConfig(
+    name="claude-sonnet",
+    tier_range=("simple", "complex"),
+    cost_per_1k_input=0.003,
+    cost_per_1k_output=0.015,
+))
+router.register_model(ModelConfig(
+    name="claude-opus",
+    tier_range=("complex", "expert"),
+    cost_per_1k_input=0.015,
+    cost_per_1k_output=0.075,
+))
 
-architecture = router.route("""
-Design a microservices architecture for handling 
-100k concurrent users with Redis caching...
-""")  
-# → claude-sonnet ($3/MTok) instead of opus ($15/MTok)
+# Route a prompt
+result = router.route("Implement a distributed task queue with priority scheduling")
+print(f"Use {result.model} (tier: {result.tier}, confidence: {result.confidence:.2f})")
+# → Use claude-sonnet (tier: complex, confidence: 0.50)
 
-# Log actual usage for cost tracking
-router.log_usage(simple_q, input_tokens=12, output_tokens=150, actual_cost=0.0024)
-
-# View savings report
-savings = router.savings_estimate()
-print(f"This month: ${savings['period_cost']:.2f}")
-print(f"Without router: ${savings['baseline_cost']:.2f}")  
-print(f"Saved: ${savings['total_savings']:.2f} ({savings['savings_percent']:.1f}%)")
+# Report outcome so the router learns
+router.report_outcome(result.prompt_hash, quality_score=0.9, success=True)
 ```
 
-## Live Routing Examples
+## Outcome Learning
 
-**How classification works in practice:**
+The router gets smarter over time. When a cheap model consistently fails on a task type, the router learns to skip it.
 
 ```python
-from antaris_router import Router
+# Initial: routes to cheap model
+result = router.route("Write a regex to validate emails")
+# → cheap (score: 0.50)
 
-router = Router()
+# After reporting 5 failures on cheap:
+router.report_outcome(hash, quality_score=0.15, success=False)
+# ... repeat ...
 
-# Trivial: Short, conversational
-decision = router.route("Hi there!")
-# → gpt-4o-mini ($0.15/MTok) 
-# → Reasoning: "Very short prompt (9 chars), 1 trivial-tier keyword found"
-
-# Simple: Factual questions  
-decision = router.route("What is machine learning?")
-# → gpt-4o-mini ($0.15/MTok)
-# → Reasoning: "Short prompt, basic question pattern"
-
-# Complex: Technical implementation
-decision = router.route("Implement a React component with TypeScript")
-# → llama-3-1-70b (free local model)
-# → Reasoning: "1 complex-tier keyword found (implement), programming context"
-
-# Expert: System architecture
-decision = router.route("""
-Design a distributed system architecture for 100k concurrent users.
-Include database sharding, Redis caching, and auto-scaling.
-""")
-# → gemini-pro-1-5 ($1.25/MTok)
-# → Reasoning: "Architecture keywords, high complexity, long prompt"
+# After reporting 4 successes on premium:
+# → premium (cheap score: 0.28, premium score: 0.89)
 ```
 
-**Deterministic decisions:** Same prompt always routes to the same model. No randomness.
-
-## Classification System
-
-**5 tiers from cheapest to most expensive:**
-
-| Tier | Cost Range | Use Cases |
-|------|------------|-----------|
-| **Trivial** | $0.10-0.20/MTok | Greetings, confirmations, simple Q&A |
-| **Simple** | $0.15-0.50/MTok | Factual lookup, basic explanations |
-| **Moderate** | $1.00-3.00/MTok | Analysis, summarization, structured data |
-| **Complex** | $2.50-15.0/MTok | Code generation, technical design |  
-| **Expert** | $15.0-75.0/MTok | Novel research, creative problem solving |
-
-**Classification signals:**
-- Presence of technical keywords (`API`, `algorithm`, `architecture`)
-- Prompt length and structural complexity (code blocks, numbered lists)
-- Explicit complexity markers (`explain in detail`, `comprehensive analysis`)
-
-**Not semantic understanding** — Uses pattern matching, not AI classification.
-
-## When This Works
-
-**Good fit:**
-- High-volume applications with mixed complexity (customer support, content generation)
-- Budget-conscious teams that need predictable routing decisions  
-- Workflows where 80% of prompts are routine, 20% need premium models
-- Integration into existing codebases without infrastructure changes
-
-**Not a good fit:**
-- Single-model applications (no cost optimization opportunity)
-- Highly specialized domains where complexity classification fails
-- Real-time applications needing sub-10ms routing decisions
-- Teams that prefer semantic similarity over keyword matching
-
-## Limitations  
-
-- **Pattern-based only** — Misclassifies prompts that don't match keyword patterns
-- **No quality feedback** — Doesn't learn if cheaper models produce poor results
-- **Static rules** — Classification logic doesn't adapt to your specific use case
-- **English-optimized** — Keyword matching may not work well for other languages
-- **No model performance tracking** — Assumes all models in a tier are equivalent
-
-If you need semantic classification or quality-based routing, this tool isn't suitable.
-
-## Configuration
-
-The router uses JSON files for all configuration. Defaults work for most use cases.
-
-**Customize model costs:**
-```bash
-# Edit config/models.json to add new models or update pricing
-vim config/models.json
+Quality scores are computed per model per tier:
+```
+score = 0.4 × success_rate + 0.4 × avg_quality + 0.2 × (1 - escalation_rate)
 ```
 
-**Adjust classification rules:**  
-```bash
-# Modify config/classification.json to tune keyword matching
-vim config/classification.json  
-```
+Models below the escalation threshold (default 0.30) are automatically skipped.
 
-**Track usage:**
+## Context-Aware Routing
+
+Pass context to influence routing decisions:
+
 ```python
-# Cost tracking happens automatically
-report = router.cost_report()
-print(f"Monthly cost: ${report['total_cost']:.2f}")
-print(f"Requests routed: {report['total_requests']:,}")
+# First attempt — routes normally
+result = router.route("Fix this bug", context={"iteration": 1})
+# → trivial → cheap model
+
+# Fifth attempt — escalates (user is struggling)
+result = router.route("Fix this bug", context={"iteration": 5})
+# → simple → better model
+
+# Long conversation — minimum moderate
+result = router.route("What do you think?", context={"conversation_length": 15})
+
+# Expert user — don't waste time with weak models
+result = router.route("Optimize this", context={"user_expertise": "expert"})
 ```
 
-All configuration files use plain JSON — no proprietary formats or complex schemas.
+## A/B Testing
+
+Validate cheap routing by occasionally sending requests to premium:
+
+```python
+router = AdaptiveRouter("./data", ab_test_rate=0.05)  # 5% of requests
+
+# 95% of trivial/simple/moderate prompts route normally
+# 5% route to the premium model for quality comparison
+# Track outcomes to confirm cheap routing is actually good enough
 ```
+
+## Fallback Chains
+
+Every routing result includes a fallback chain:
+
+```python
+result = router.route("Write unit tests for authentication")
+print(result.model)           # → gpt-4o-mini
+print(result.fallback_chain)  # → ['claude-sonnet', 'claude-opus']
+
+# If the primary model fails:
+next_model = router.escalate(result.prompt_hash)
+print(next_model)  # → claude-sonnet
+```
+
+## Teaching Corrections
+
+When the classifier gets it wrong, teach it:
+
+```python
+# Classifier thinks this is simple, but it's actually complex
+router.teach(
+    "Optimize our Kubernetes deployment for cost efficiency",
+    "complex"
+)
+# Correction is learned permanently and improves future classifications
+```
+
+## Semantic Classification
+
+The classifier uses TF-IDF (term frequency-inverse document frequency) with cosine similarity, not keyword matching.
+
+**How it works:**
+1. Ships with ~50 labeled examples across 5 tiers (trivial → expert)
+2. Builds TF-IDF vectors from the example corpus
+3. For each new prompt, computes similarity to all examples
+4. Scores each tier by average similarity to its top-3 closest examples
+5. Applies structural adjustments (long prompts can't be trivial, code presence boosts tier)
+
+**Why not embeddings?** Embeddings would be better but require either an API call (defeats offline goal) or a model file (~100MB+). TF-IDF gets 80% of the benefit with zero dependencies.
 
 ## Storage Format
 
-Router state and cost tracking data are stored in JSON:
-
-```json
-{
-  "version": "1.0.0",
-  "saved_at": "2026-02-15T14:30:00",
-  "usage_history": [
-    {
-      "timestamp": "2026-02-15T10:00:00",
-      "model_name": "gpt-4o-mini",
-      "tier": "simple",
-      "input_tokens": 50,
-      "output_tokens": 30,
-      "actual_cost": 0.0000825,
-      "routing_confidence": 0.87
-    }
-  ]
-}
 ```
+routing_data/
+├── routing_examples.json    # Labeled examples (seed + learned)
+├── routing_model.json       # TF-IDF model (IDF weights, vocab)
+├── routing_decisions.json   # Decision history for outcome learning
+├── model_profiles.json      # Per-model per-tier quality scores
+└── router_config.json       # Model registry and settings
+```
+
+All plain JSON. Inspect or edit with any text editor.
 
 ## Architecture
 
-Simple 4-component design:
-- **TaskClassifier** — Prompt → complexity tier  
-- **ModelRegistry** — Model definitions and costs
-- **CostTracker** — Usage logging and savings calculation
-- **Router** — Combines everything, returns routing decisions
-
-Data flow: `prompt → classify → find cheapest model for tier → return decision`
-
-## Part of Antaris Analytics Suite
-
-antaris-router works best as part of the Antaris Analytics ecosystem:
-
-- **[antaris-memory](https://github.com/Antaris-Analytics/antaris-memory)** — File-based persistent memory for AI agents
-- **antaris-router** (this package) — Cost-optimized model routing
-- **antaris-guard** (coming soon) — Prompt injection detection
-- **antaris-context** (coming soon) — Context window optimization
-
-All packages share the same design principles: file-based, deterministic, zero dependencies.
-
-## Competitive Landscape
-
-- **OpenRouter, LiteLLM, Martian, Unify.ai** — Full model proxies with API routing
-- **RouteLLM (LMSys)** — Learned routing based on quality metrics  
-- **Portkey** — Model gateway with observability
-
-*Our differentiator: Offline routing decisions with transparent, editable rules.*
-
-## Development
-
-```bash
-# Run tests
-python -m pytest tests/ -v
-
-# Install development dependencies  
-pip install -e .[dev]
-
-# Type checking
-mypy antaris_router/
 ```
+AdaptiveRouter
+├── SemanticClassifier
+│   └── TFIDFVectorizer     — Term weighting + cosine similarity
+├── QualityTracker
+│   ├── RoutingDecision      — Decision + outcome records
+│   └── ModelProfiles        — Per-model per-tier quality scores
+├── ContextAdjuster          — Iteration, conversation, expertise signals
+├── FallbackChain            — Ordered model escalation
+└── ABTester                 — Validation routing (configurable %)
+```
+
+**Routing flow:** `prompt → semantic classify → context adjust → quality filter → select model → record decision → return`
+
+## Tiers
+
+| Tier | Description | Examples |
+|------|-------------|----------|
+| trivial | One-line answers, lookups | "What is 2+2?", "Define photosynthesis" |
+| simple | Short tasks, basic code | "Reverse a string", "Explain TCP vs UDP" |
+| moderate | Multi-step implementation | "Build a REST API with auth", "Write a caching layer" |
+| complex | Architecture, multi-system | "Design microservices for e-commerce", "Build a custom ORM" |
+| expert | Full system design | "Architect a globally distributed database", "Design HFT platform" |
+
+## Comparison
+
+| | Antaris Router | OpenRouter | LiteLLM | RouteLLM |
+|---|---|---|---|---|
+| Classification | TF-IDF semantic | API proxy | API proxy | Embeddings |
+| Learning | ✅ Outcome tracking | ❌ | ❌ | ✅ |
+| Offline | ✅ | ❌ | ❌ | ❌ |
+| A/B testing | ✅ Built-in | ❌ | ❌ | ❌ |
+| Context-aware | ✅ | ❌ | ❌ | ❌ |
+| Fallback chains | ✅ | ✅ | ✅ | ❌ |
+| Zero dependencies | ✅ | ❌ | ❌ | ❌ |
+| Infrastructure | None | Cloud | Cloud | GPU/API |
+
+**Honest assessment:** OpenRouter and LiteLLM are API proxies that do more (actual request forwarding, billing, rate limiting). Antaris Router is a classification library — it tells you which model to use, not how to call it. Different tools for different needs.
+
+## Legacy API
+
+The v1 keyword-based router is still available:
+
+```python
+from antaris_router import Router  # v1 API
+router = Router("./config")
+decision = router.route("What's 2+2?")
+```
+
+We recommend migrating to `AdaptiveRouter` for better classification accuracy.
+
+## Part of the Antaris Analytics Suite
+
+- **[antaris-memory](https://pypi.org/project/antaris-memory/)** — Persistent memory for AI agents
+- **antaris-router** — Adaptive model routing (this package)
+- **antaris-guard** — Security and prompt injection detection (coming soon)
+- **antaris-context** — Context window optimization (coming soon)
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
-
----
-
-**Part of Antaris Analytics** — File-based tools for deterministic AI applications.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
