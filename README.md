@@ -5,7 +5,7 @@
 Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. All state stored in plain JSON files.
 
 [![PyPI](https://img.shields.io/pypi/v/antaris-router)](https://pypi.org/project/antaris-router/)
-[![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)](https://github.com/Antaris-Analytics/antaris-router)
+[![Tests](https://github.com/Antaris-Analytics/antaris-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Antaris-Analytics/antaris-router/actions/workflows/tests.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
