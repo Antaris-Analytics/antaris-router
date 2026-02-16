@@ -35,3 +35,6 @@ Issues = "https://github.com/Antaris-Analytics/antaris-router/issues"
 
 [tool.setuptools.packages.find]
 include = ["antaris_router*"]
+
+[tool.setuptools.package-data]
+antaris_router = ["*.json"]
