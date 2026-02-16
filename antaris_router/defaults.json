@@ -1,0 +1,90 @@
+{
+    "models": [
+        {
+            "name": "gpt-4o-mini",
+            "provider": "openai",
+            "cost_per_1k_input": 0.00015,
+            "cost_per_1k_output": 0.0006,
+            "capabilities": ["text", "code", "reasoning"],
+            "max_tokens": 128000,
+            "tier": ["trivial", "simple", "moderate"]
+        },
+        {
+            "name": "gpt-4o",
+            "provider": "openai",
+            "cost_per_1k_input": 0.0025,
+            "cost_per_1k_output": 0.01,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 128000,
+            "tier": ["simple", "moderate", "complex", "expert"]
+        },
+        {
+            "name": "claude-haiku-3-5",
+            "provider": "anthropic",
+            "cost_per_1k_input": 0.0008,
+            "cost_per_1k_output": 0.004,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 200000,
+            "tier": ["trivial", "simple", "moderate", "complex"]
+        },
+        {
+            "name": "claude-sonnet-3-5",
+            "provider": "anthropic",
+            "cost_per_1k_input": 0.003,
+            "cost_per_1k_output": 0.015,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 200000,
+            "tier": ["moderate", "complex", "expert"]
+        },
+        {
+            "name": "claude-opus-3",
+            "provider": "anthropic",
+            "cost_per_1k_input": 0.015,
+            "cost_per_1k_output": 0.075,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 200000,
+            "tier": ["complex", "expert"]
+        },
+        {
+            "name": "gemini-flash-1-5",
+            "provider": "google",
+            "cost_per_1k_input": 0.00015,
+            "cost_per_1k_output": 0.0006,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 1048576,
+            "tier": ["trivial", "simple", "moderate"]
+        },
+        {
+            "name": "gemini-pro-1-5",
+            "provider": "google",
+            "cost_per_1k_input": 0.00125,
+            "cost_per_1k_output": 0.005,
+            "capabilities": ["text", "code", "reasoning", "vision"],
+            "max_tokens": 2097152,
+            "tier": ["moderate", "complex", "expert"]
+        },
+        {
+            "name": "llama-3-1-70b-instruct",
+            "provider": "local",
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "capabilities": ["text", "code", "reasoning"],
+            "max_tokens": 128000,
+            "tier": ["simple", "moderate", "complex"]
+        }
+    ],
+    "classification_rules": {
+        "trivial_keywords": ["hello", "hi", "thanks", "thank you", "yes", "no", "ok", "okay"],
+        "simple_keywords": ["what", "when", "where", "who", "how", "define", "explain", "list"],
+        "moderate_keywords": ["analyze", "compare", "summarize", "review", "plan", "design"],
+        "complex_keywords": ["implement", "code", "develop", "debug", "architecture", "algorithm"],
+        "expert_keywords": ["research", "synthesis", "evaluate", "strategy", "optimization", "novel"],
+        "code_indicators": ["```", "def ", "class ", "function", "import", "from ", "SELECT", "CREATE"],
+        "length_thresholds": {
+            "trivial_max": 50,
+            "simple_max": 200,
+            "moderate_max": 1000,
+            "complex_max": 3000
+        }
+    }
+}
