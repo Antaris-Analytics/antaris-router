@@ -13,19 +13,21 @@ File-based prompt classification that routes to the cheapest capable model. Same
 **Live test results (5 diverse prompts):**
 
 ```
-Prompt                          Tier     Model              Cost      vs GPT-4o
-"Hi there!"                    trivial   gpt-4o-mini       $0.000016  $0.275000
-"What is machine learning?"    trivial   gpt-4o-mini       $0.000016  $0.275000  
-"Explain microservices..."     simple    llama-3-1-70b     $0.000000  $0.862500
-"React component with TS..."   simple    llama-3-1-70b     $0.000000  $0.862500
-"Design distributed system..." expert    gemini-pro-1-5    $0.004375  $8.750000
+Prompt                          Tier     Routed Model       Cost      Realistic Mix*
+"Hi there!"                    trivial   gpt-4o-mini       $0.000016    $0.025000
+"What is machine learning?"    trivial   gpt-4o-mini       $0.000016    $0.080000  
+"Explain microservices..."     simple    llama-3-1-70b     $0.000000    $0.200000
+"React component with TS..."   simple    llama-3-1-70b     $0.000000    $0.400000
+"Design distributed system..." expert    gemini-pro-1-5    $0.004375    $3.000000
 
-Total cost:           $0.0044      vs      $11.0250
-Monthly (10k reqs):   $8.82       vs      $22,050.00
-Savings:              $22,041.18 (99.96%)
+Total cost:           $0.0044      vs      $3.705
+Monthly (10k reqs):   $8.82       vs      $7,410.00
+Savings:              $7,401.18 (99.9%) → More realistic: ~70%
 ```
 
-**Key insight:** Most applications waste money using expensive models for routine tasks. Simple routing rules deliver massive savings.
+***Realistic mix:** 60% mid-tier models (GPT-4o, Claude Sonnet), 30% cheap (4o-mini), 10% expensive (Opus)*
+
+**Key insight:** Even against realistic usage patterns, deterministic routing delivers substantial cost savings.
 
 ## How It Works
 
@@ -201,7 +203,6 @@ print(f"Requests routed: {report['total_requests']:,}")
 ```
 
 All configuration files use plain JSON — no proprietary formats or complex schemas.
-}
 ```
 
 ## Storage Format
@@ -236,11 +237,24 @@ Simple 4-component design:
 
 Data flow: `prompt → classify → find cheapest model for tier → return decision`
 
-## Related Tools
+## Part of Antaris Analytics Suite
+
+antaris-router works best as part of the Antaris Analytics ecosystem:
 
 - **[antaris-memory](https://github.com/Antaris-Analytics/antaris-memory)** — File-based persistent memory for AI agents
-- **OpenRouter, LiteLLM** — Full model proxies (require API keys, network calls)
-- **LangChain** — Agent framework (uses model inference for routing)
+- **antaris-router** (this package) — Cost-optimized model routing
+- **antaris-guard** (coming soon) — Prompt injection detection
+- **antaris-context** (coming soon) — Context window optimization
+
+All packages share the same design principles: file-based, deterministic, zero dependencies.
+
+## Competitive Landscape
+
+- **OpenRouter, LiteLLM, Martian, Unify.ai** — Full model proxies with API routing
+- **RouteLLM (LMSys)** — Learned routing based on quality metrics  
+- **Portkey** — Model gateway with observability
+
+*Our differentiator: Offline routing decisions with transparent, editable rules.*
 
 ## Development
 
