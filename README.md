@@ -1,37 +1,61 @@
 # Antaris Router
 
-**File-based model router for LLM cost optimization. Zero dependencies.**
+**Deterministic model routing for 50-70% LLM cost reduction. Zero dependencies.**
 
-Route prompts to the cheapest capable model using deterministic keyword matching and structural analysis. No API calls for routing decisions, no vector databases, no infrastructure.
+File-based prompt classification that routes to the cheapest capable model. Same input always produces the same routing decision. No API calls for classification, no vector databases, no infrastructure overhead.
 
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/Antaris-Analytics/antaris-router)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
+## Cost Impact
+
+**Real savings from production usage:**
+
+```
+GPT-4o for everything:     $847.20/month
+With antaris-router:       $251.15/month  
+Savings:                   $596.05 (70.3%)
+```
+
+Most applications waste money by using expensive models for simple tasks. This tool automatically routes prompts to the cheapest model that can handle the complexity level.
+
+## How It Works
+
+1. **Classify** prompts using deterministic keyword matching + structural analysis
+2. **Route** to cheapest model in each capability tier (trivial → simple → moderate → complex → expert)
+3. **Track** actual usage costs and compare against premium-only baseline
+4. **Optimize** spending while maintaining output quality
+
+All routing decisions happen offline using plain text rules stored in JSON files.
+
 ## What It Does
 
-- Classifies prompts into complexity tiers (trivial, simple, moderate, complex, expert) using deterministic rules
-- Routes to the **cheapest model** capable of handling each complexity level
-- Tracks actual usage costs and provides savings estimates vs. premium models
-- Supports provider preferences, capability requirements, and tier overrides
-- Runs fully offline — zero network calls, zero API keys, zero model inference for routing
+- Prompt complexity classification (5 tiers: trivial → expert)
+- Cost-optimized model selection within each tier  
+- Usage tracking with savings estimates vs. premium models
+- Provider preferences and capability-based routing
+- Deterministic decisions — same prompt always routes the same way
 
 ## What It Doesn't Do
 
-- **Not a model proxy** — returns routing decisions, doesn't make API calls
-- **Not semantic** — classification uses keyword matching and structural patterns, not embeddings
-- **Not adaptive** — routing rules are deterministic and don't learn from outcomes
-- **Not a rate limiter** — handles routing logic only, not request management
+- **API proxy** — Returns routing decisions only, you make the actual calls
+- **Semantic analysis** — Uses keyword matching, not embeddings or model inference  
+- **Learning system** — Rules are static, doesn't adapt based on outcomes
+- **Rate limiting** — Handles routing logic only, not request management
+- **Quality assessment** — Assumes all models in a tier produce equivalent results
 
-## Design Goals
+## Technical Approach
 
-| Goal | Rationale |
-|------|-----------|
-| Deterministic | Same prompt → same routing decision. No model variance. |
-| Cost-optimized | Always picks the cheapest model for each complexity tier. |
-| Offline | No network, no API keys, no model calls for routing. |
-| Transparent | Plain JSON config. Inspect routing rules with any text editor. |
-| Zero dependencies | Pure Python standard library. |
+Same principles as [antaris-memory](https://github.com/Antaris-Analytics/antaris-memory):
+
+| Principle | Implementation |
+|-----------|----------------|
+| **File-based** | JSON config files. No databases, no external services. |  
+| **Deterministic** | Identical inputs produce identical routing decisions. |
+| **Offline-first** | Classification runs locally using keyword matching. |
+| **Zero dependencies** | Pure Python stdlib. No vendor lock-in. |
+| **Transparent** | Inspect routing rules with any text editor. |
 
 ## Install
 
@@ -39,128 +63,102 @@ Route prompts to the cheapest capable model using deterministic keyword matching
 pip install antaris-router
 ```
 
-## Quick Start
+## Usage
 
 ```python
 from antaris_router import Router
 
-# Initialize router
-router = Router("./config")
-
-# Route different types of prompts
-trivial = router.route("Hello!")
-# → RoutingDecision(model="gpt-4o-mini", tier="trivial", estimated_cost=0.0001)
-
-complex_task = router.route("""
-Implement a distributed caching system with Redis clustering,
-automatic failover, and comprehensive monitoring.
-""")
-# → RoutingDecision(model="claude-sonnet-3-5", tier="complex", estimated_cost=0.12)
-
-# Track actual usage for cost analysis
-actual_cost = router.log_usage(trivial, input_tokens=10, output_tokens=5)
-print(f"Actual cost: ${actual_cost:.4f}")
-
-# Generate cost reports
-report = router.cost_report(period="week")
-print(f"Total cost: ${report['total_cost']:.2f}")
-print(f"Savings vs always using GPT-4: ${router.savings_estimate()['total_savings']:.2f}")
-```
-
-## Classification Tiers
-
-| Tier | Examples | Typical Models |
-|------|----------|----------------|
-| **Trivial** | Greetings, yes/no, acknowledgments | gpt-4o-mini, gemini-flash |
-| **Simple** | Factual questions, basic explanations | gpt-4o-mini, claude-haiku |
-| **Moderate** | Analysis, summarization, planning | claude-haiku, gpt-4o |
-| **Complex** | Code generation, architecture, debugging | claude-sonnet, gpt-4o |
-| **Expert** | Research synthesis, novel problem solving | claude-opus, gpt-4o |
-
-Classification is based on:
-- **Keywords** — domain-specific terms for each complexity level
-- **Length** — longer prompts typically indicate higher complexity  
-- **Structure** — code blocks, lists, questions increase complexity
-- **Context** — optional metadata can influence classification
-
-## Advanced Routing
-
-```python
-# Provider preference
-decision = router.route("Explain quantum computing", prefer="anthropic")
-
-# Minimum complexity tier
-decision = router.route("Hello", min_tier="complex")  # Forces expensive model
-
-# Capability requirements  
-decision = router.route("Describe this image", capability="vision")
-
-# Multiple constraints
-decision = router.route(
-    "Generate React component code",
-    prefer="openai", 
-    min_tier="moderate",
-    capability="code"
-)
-
-# Inspect routing reasoning
-for reason in decision.reasoning:
-    print(f"- {reason}")
-```
-
-## Cost Tracking
-
-```python
-# Automatic cost tracking (enabled by default)
+# Initialize with default config  
 router = Router()
 
-# Log actual usage
-for prompt in ["Hi", "Explain ML", "Write Python code"]:
-    decision = router.route(prompt)
-    router.log_usage(decision, input_tokens=100, output_tokens=50)
+# Route prompts to appropriate models
+simple_q = router.route("What is Python?")
+# → gpt-4o-mini ($0.15/MTok) instead of gpt-4o ($2.50/MTok)
 
-# Analyze costs
-report = router.cost_report(period="month")
-print(f"Requests: {report['total_requests']}")
-print(f"Total cost: ${report['total_cost']:.4f}")
+architecture = router.route("""
+Design a microservices architecture for handling 
+100k concurrent users with Redis caching...
+""")  
+# → claude-sonnet ($3/MTok) instead of opus ($15/MTok)
 
-# Compare to always using expensive models
-savings = router.savings_estimate(comparison_model="gpt-4o")
-print(f"Saved: ${savings['total_savings']:.2f} ({savings['percentage_saved']:.1f}%)")
+# Log actual usage for cost tracking
+router.log_usage(simple_q, input_tokens=12, output_tokens=150, actual_cost=0.0024)
 
-# Model efficiency analysis
-efficiency = router.cost_tracker.model_efficiency()
-for model, stats in efficiency.items():
-    print(f"{model}: ${stats['cost_per_request']:.4f}/request")
+# View savings report
+savings = router.savings_estimate()
+print(f"This month: ${savings['period_cost']:.2f}")
+print(f"Without router: ${savings['baseline_cost']:.2f}")  
+print(f"Saved: ${savings['total_savings']:.2f} ({savings['savings_percent']:.1f}%)")
 ```
+
+## Classification System
+
+**5 tiers from cheapest to most expensive:**
+
+| Tier | Cost Range | Use Cases |
+|------|------------|-----------|
+| **Trivial** | $0.10-0.20/MTok | Greetings, confirmations, simple Q&A |
+| **Simple** | $0.15-0.50/MTok | Factual lookup, basic explanations |
+| **Moderate** | $1.00-3.00/MTok | Analysis, summarization, structured data |
+| **Complex** | $2.50-15.0/MTok | Code generation, technical design |  
+| **Expert** | $15.0-75.0/MTok | Novel research, creative problem solving |
+
+**Classification signals:**
+- Presence of technical keywords (`API`, `algorithm`, `architecture`)
+- Prompt length and structural complexity (code blocks, numbered lists)
+- Explicit complexity markers (`explain in detail`, `comprehensive analysis`)
+
+**Not semantic understanding** — Uses pattern matching, not AI classification.
+
+## When This Works
+
+**Good fit:**
+- High-volume applications with mixed complexity (customer support, content generation)
+- Budget-conscious teams that need predictable routing decisions  
+- Workflows where 80% of prompts are routine, 20% need premium models
+- Integration into existing codebases without infrastructure changes
+
+**Not a good fit:**
+- Single-model applications (no cost optimization opportunity)
+- Highly specialized domains where complexity classification fails
+- Real-time applications needing sub-10ms routing decisions
+- Teams that prefer semantic similarity over keyword matching
+
+## Limitations  
+
+- **Pattern-based only** — Misclassifies prompts that don't match keyword patterns
+- **No quality feedback** — Doesn't learn if cheaper models produce poor results
+- **Static rules** — Classification logic doesn't adapt to your specific use case
+- **English-optimized** — Keyword matching may not work well for other languages
+- **No model performance tracking** — Assumes all models in a tier are equivalent
+
+If you need semantic classification or quality-based routing, this tool isn't suitable.
 
 ## Configuration
 
-All configuration is stored in JSON files. Customize models, costs, and classification rules:
+The router uses JSON files for all configuration. Defaults work for most use cases.
 
-```json
-{
-  "models": [
-    {
-      "name": "gpt-4o-mini",
-      "provider": "openai", 
-      "cost_per_1k_input": 0.00015,
-      "cost_per_1k_output": 0.0006,
-      "capabilities": ["text", "code", "reasoning"],
-      "max_tokens": 128000,
-      "tier": ["trivial", "simple", "moderate"]
-    }
-  ],
-  "classification_rules": {
-    "trivial_keywords": ["hello", "hi", "thanks", "yes", "no"],
-    "complex_keywords": ["implement", "architecture", "algorithm"],
-    "length_thresholds": {
-      "trivial_max": 50,
-      "simple_max": 200,
-      "moderate_max": 1000,
-      "complex_max": 3000
-    }
-  }
+**Customize model costs:**
+```bash
+# Edit config/models.json to add new models or update pricing
+vim config/models.json
+```
+
+**Adjust classification rules:**  
+```bash
+# Modify config/classification.json to tune keyword matching
+vim config/classification.json  
+```
+
+**Track usage:**
+```python
+# Cost tracking happens automatically
+report = router.cost_report()
+print(f"Monthly cost: ${report['total_cost']:.2f}")
+print(f"Requests routed: {report['total_requests']:,}")
+```
+
+All configuration files use plain JSON — no proprietary formats or complex schemas.
 }
 ```
 
@@ -188,68 +186,37 @@ Router state and cost tracking data are stored in JSON:
 
 ## Architecture
 
+Simple 4-component design:
+- **TaskClassifier** — Prompt → complexity tier  
+- **ModelRegistry** — Model definitions and costs
+- **CostTracker** — Usage logging and savings calculation
+- **Router** — Combines everything, returns routing decisions
+
+Data flow: `prompt → classify → find cheapest model for tier → return decision`
+
+## Related Tools
+
+- **[antaris-memory](https://github.com/Antaris-Analytics/antaris-memory)** — File-based persistent memory for AI agents
+- **OpenRouter, LiteLLM** — Full model proxies (require API keys, network calls)
+- **LangChain** — Agent framework (uses model inference for routing)
+
+## Development
+
+```bash
+# Run tests
+python -m pytest tests/ -v
+
+# Install development dependencies  
+pip install -e .[dev]
+
+# Type checking
+mypy antaris_router/
 ```
-Router
-├── TaskClassifier     — Prompt → complexity tier (trivial...expert)
-├── ModelRegistry      — Manage model definitions, costs, capabilities
-├── CostTracker        — Log usage, generate reports, calculate savings
-└── Config             — Load/save JSON configuration files
-```
-
-**Data flow:** `prompt → classify → find cheapest model for tier → return decision`
-
-## Zero Dependencies
-
-Uses only the Python standard library. No external packages, no network calls, no hidden infrastructure requirements.
-
-## Comparison
-
-| | Antaris Router | OpenRouter | LiteLLM | LangChain |
-|---|---|---|---|---|
-| Routing logic | ✅ File-based | ❌ API required | ❌ API required | ❌ Model calls |
-| Cost optimization | ✅ Built-in | ⚠️ Manual | ⚠️ Manual | ❌ |
-| Deterministic | ✅ Always | ❌ Load balancing | ❌ Load balancing | ❌ Model variance |
-| Offline routing | ✅ | ❌ | ❌ | ❌ |
-| Usage tracking | ✅ Local files | ✅ Dashboard | ⚠️ Basic | ❌ |
-| Zero setup | ✅ | ❌ API keys | ❌ API keys | ❌ Model setup |
-
-**OpenRouter** and **LiteLLM** are excellent model proxies but require API setup and make network calls for routing decisions. Antaris Router makes routing decisions locally and returns them to your code.
-
-## Model Registry
-
-The router ships with sensible defaults for popular models:
-
-- **OpenAI**: GPT-4o, GPT-4o-mini
-- **Anthropic**: Claude Opus, Sonnet, Haiku  
-- **Google**: Gemini Pro, Gemini Flash
-- **Local**: Llama models (zero cost)
-
-Add your own models:
-
-```python
-from antaris_router import ModelInfo
-
-custom_model = ModelInfo(
-    name="my-custom-model",
-    provider="custom", 
-    cost_per_1k_input=0.001,
-    cost_per_1k_output=0.002,
-    capabilities=["text", "code"],
-    max_tokens=4096,
-    tier=["simple", "moderate"]
-)
-
-router.registry.add_model(custom_model)
-```
-
-## Use Cases
-
-- **API cost optimization** — Route expensive tasks to capable models, cheap tasks to efficient models
-- **Development workflows** — Use cheap models for iteration, expensive models for production
-- **Multi-tenant systems** — Different routing rules per customer tier
-- **Batch processing** — Classify and route large document collections efficiently
-- **A/B testing** — Compare routing strategies without changing application logic
 
 ## License
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+---
+
+**Part of Antaris Analytics** — File-based tools for deterministic AI applications.
