@@ -247,6 +247,45 @@ AdaptiveRouter
 
 **Honest assessment:** OpenRouter and LiteLLM are API proxies that do more (actual request forwarding, billing, rate limiting). Antaris Router is a classification library — it tells you which model to use, not how to call it. Different tools for different needs.
 
+## Works With Local Models (Ollama)
+
+Route between cloud APIs and local Ollama models to minimize costs:
+
+```python
+router = AdaptiveRouter("./routing_data")
+
+# Local models via Ollama — $0 per request
+router.register_model(ModelConfig(
+    name="llama3-8b",
+    tier_range=("trivial", "simple"),
+    cost_per_1k_input=0.0,
+    cost_per_1k_output=0.0,
+))
+router.register_model(ModelConfig(
+    name="mistral-7b",
+    tier_range=("trivial", "moderate"),
+    cost_per_1k_input=0.0,
+    cost_per_1k_output=0.0,
+))
+
+# Cloud models for heavy lifting
+router.register_model(ModelConfig(
+    name="claude-sonnet",
+    tier_range=("moderate", "complex"),
+    cost_per_1k_input=0.003,
+    cost_per_1k_output=0.015,
+))
+
+# Trivial/simple tasks → local (free), complex → cloud (paid)
+result = router.route("What time is it in Tokyo?")
+# → llama3-8b ($0.00)
+
+result = router.route("Design a distributed caching layer")
+# → claude-sonnet (paid, but only when needed)
+```
+
+The router doesn't call models — it just tells you which one to use. Wire it up to Ollama's API or any LLM client you prefer.
+
 ## Legacy API
 
 The v1 keyword-based router is still available:
