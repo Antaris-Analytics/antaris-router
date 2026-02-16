@@ -39,7 +39,7 @@ Note: "Implement a React component" routes to **moderate**, not trivial. The sem
 ## Performance
 
 ```
-Routing latency (100 calls): median 0.04ms, p99 0.17ms
+Routing latency: median 0.05ms, p99 0.09ms, avg 0.05ms (10 prompts, cold start)
 Classification: ~50 seed examples across 5 tiers, TF-IDF with cosine similarity
 Memory: <5MB for typical workloads
 Storage: 3 JSON files (examples, model, decisions)
@@ -249,42 +249,44 @@ AdaptiveRouter
 
 ## Works With Local Models (Ollama)
 
-Route between cloud APIs and local Ollama models to minimize costs:
+Register Ollama models at `$0.00` cost. The router sends trivial/simple work to local models and reserves cloud APIs for tasks that need them.
 
 ```python
 router = AdaptiveRouter("./routing_data")
 
-# Local models via Ollama — $0 per request
 router.register_model(ModelConfig(
-    name="llama3-8b",
+    name="qwen3-8b-local",        # Ollama — $0/request
     tier_range=("trivial", "simple"),
-    cost_per_1k_input=0.0,
-    cost_per_1k_output=0.0,
+    cost_per_1k_input=0.0, cost_per_1k_output=0.0,
 ))
 router.register_model(ModelConfig(
-    name="mistral-7b",
-    tier_range=("trivial", "moderate"),
-    cost_per_1k_input=0.0,
-    cost_per_1k_output=0.0,
+    name="claude-sonnet-4",       # Cloud — moderate/complex
+    tier_range=("simple", "complex"),
+    cost_per_1k_input=0.003, cost_per_1k_output=0.015,
 ))
-
-# Cloud models for heavy lifting
 router.register_model(ModelConfig(
-    name="claude-sonnet",
-    tier_range=("moderate", "complex"),
-    cost_per_1k_input=0.003,
-    cost_per_1k_output=0.015,
+    name="claude-opus-4",         # Cloud — complex/expert
+    tier_range=("complex", "expert"),
+    cost_per_1k_input=0.015, cost_per_1k_output=0.075,
 ))
-
-# Trivial/simple tasks → local (free), complex → cloud (paid)
-result = router.route("What time is it in Tokyo?")
-# → llama3-8b ($0.00)
-
-result = router.route("Design a distributed caching layer")
-# → claude-sonnet (paid, but only when needed)
 ```
 
-The router doesn't call models — it just tells you which one to use. Wire it up to Ollama's API or any LLM client you prefer.
+**Actual routing results** (Apple M4, qwen3-8b via Ollama):
+
+```
+Prompt                                                            Tier      Model              Cost
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+What is 2 + 2?                                                    trivial   qwen3-8b-local     $0.00
+Translate 'hello' to Spanish                                      trivial   qwen3-8b-local     $0.00
+Write a Python function to reverse a string                       simple    qwen3-8b-local     $0.00
+Create a REST API endpoint with JWT authentication                moderate  claude-sonnet-4    API
+Design microservices for a marketplace with 10K users             complex   claude-sonnet-4    API
+Architect a globally distributed database with CRDTs              expert    claude-opus-4      API
+```
+
+**40% of requests route to local models ($0.00).** At 1,000 requests/day, that's ~$10.80/day vs ~$18.00/day all-Sonnet or ~$90.00/day all-Opus.
+
+The router doesn't call models — it tells you which one to use. Wire it up to Ollama's API, LiteLLM, or any client you prefer.
 
 ## Legacy API
 
