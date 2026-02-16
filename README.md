@@ -288,6 +288,17 @@ Architect a globally distributed database with CRDTs              expert    clau
 
 The router doesn't call models — it tells you which one to use. Wire it up to Ollama's API, LiteLLM, or any client you prefer.
 
+## Running Tests
+
+```bash
+git clone https://github.com/Antaris-Analytics/antaris-router.git
+cd antaris-router
+pip install pytest
+python -m pytest tests/ -v
+```
+
+All 67 tests pass with zero external dependencies (pytest is only needed as the test runner).
+
 ## Legacy API
 
 The v1 keyword-based router is still available:
