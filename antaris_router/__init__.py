@@ -16,7 +16,7 @@ Usage:
     router.log_usage(decision, input_tokens=50, output_tokens=20)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 from .router import Router, RoutingDecision
 from .classifier import TaskClassifier, ClassificationResult

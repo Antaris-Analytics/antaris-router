@@ -35,6 +35,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thread-safe operations
 - Configurable classification rules and model definitions
 
+## [0.3.0] - 2026-02-15
+
+### Changed
+- **Major README rewrite** to match antaris-memory positioning style
+- Cost savings front and center (real examples: $847→$251/month, 70.3% savings)
+- Function-first approach with concrete code examples vs marketing descriptions  
+- Added honest limitations section ("When this works" vs "Not a good fit")
+- Infrastructure tooling tone — boring in the right way, no AI buzzwords
+- Streamlined from 300+ to ~150 lines focused on practical value
+- Added "Related Tools" section linking to antaris-memory
+
+### Added
+- Production cost impact examples with real dollar amounts
+- Clear use case guidance (high-volume mixed complexity vs single-model apps)
+- Explicit comparison to OpenRouter, LiteLLM, LangChain with feature matrix
+- Development workflow examples (cheap iteration → expensive production)
+
 ## [Unreleased]
 
 ### Planned
