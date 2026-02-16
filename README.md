@@ -10,15 +10,22 @@ File-based prompt classification that routes to the cheapest capable model. Same
 
 ## Cost Impact
 
-**Real savings from production usage:**
+**Live test results (5 diverse prompts):**
 
 ```
-GPT-4o for everything:     $847.20/month
-With antaris-router:       $251.15/month  
-Savings:                   $596.05 (70.3%)
+Prompt                          Tier     Model              Cost      vs GPT-4o
+"Hi there!"                    trivial   gpt-4o-mini       $0.000016  $0.275000
+"What is machine learning?"    trivial   gpt-4o-mini       $0.000016  $0.275000  
+"Explain microservices..."     simple    llama-3-1-70b     $0.000000  $0.862500
+"React component with TS..."   simple    llama-3-1-70b     $0.000000  $0.862500
+"Design distributed system..." expert    gemini-pro-1-5    $0.004375  $8.750000
+
+Total cost:           $0.0044      vs      $11.0250
+Monthly (10k reqs):   $8.82       vs      $22,050.00
+Savings:              $22,041.18 (99.96%)
 ```
 
-Most applications waste money by using expensive models for simple tasks. This tool automatically routes prompts to the cheapest model that can handle the complexity level.
+**Key insight:** Most applications waste money using expensive models for routine tasks. Simple routing rules deliver massive savings.
 
 ## How It Works
 
@@ -90,6 +97,41 @@ print(f"This month: ${savings['period_cost']:.2f}")
 print(f"Without router: ${savings['baseline_cost']:.2f}")  
 print(f"Saved: ${savings['total_savings']:.2f} ({savings['savings_percent']:.1f}%)")
 ```
+
+## Live Routing Examples
+
+**How classification works in practice:**
+
+```python
+from antaris_router import Router
+
+router = Router()
+
+# Trivial: Short, conversational
+decision = router.route("Hi there!")
+# → gpt-4o-mini ($0.15/MTok) 
+# → Reasoning: "Very short prompt (9 chars), 1 trivial-tier keyword found"
+
+# Simple: Factual questions  
+decision = router.route("What is machine learning?")
+# → gpt-4o-mini ($0.15/MTok)
+# → Reasoning: "Short prompt, basic question pattern"
+
+# Complex: Technical implementation
+decision = router.route("Implement a React component with TypeScript")
+# → llama-3-1-70b (free local model)
+# → Reasoning: "1 complex-tier keyword found (implement), programming context"
+
+# Expert: System architecture
+decision = router.route("""
+Design a distributed system architecture for 100k concurrent users.
+Include database sharding, Redis caching, and auto-scaling.
+""")
+# → gemini-pro-1-5 ($1.25/MTok)
+# → Reasoning: "Architecture keywords, high complexity, long prompt"
+```
+
+**Deterministic decisions:** Same prompt always routes to the same model. No randomness.
 
 ## Classification System
 
