@@ -1,4 +1,4 @@
-# Antaris Router
+# antaris-router
 
 **Adaptive model router for LLM cost optimization. Learns from outcomes. Zero dependencies.**
 
@@ -14,48 +14,12 @@ Routes prompts to the cheapest capable model using semantic classification (TF-I
 - **SLA Monitor** — enforce cost budgets and latency targets per model/tier; `SLAConfig(max_latency_ms=..., budget_per_hour_usd=...)`, `get_sla_report()`, `check_budget_alert()`
 - **Confidence Routing** — `RoutingDecision.confidence_basis` for cross-package tracing; `ConfidenceRouter` for score-weighted decisions
 - **Suite integration** — router hints consumed by `antaris-context` via `set_router_hints()` for adaptive context budget allocation
-- **Backward compatibility** — all Sprint 7 SLA params optional; safe defaults throughout; existing `AdaptiveRouter` code unchanged
+- **Backward compatibility** — all SLA params optional; safe defaults throughout; existing `AdaptiveRouter` code unchanged
 - 194 tests (all passing)
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-## What It Does
-
-- **Semantic classification** — TF-IDF vectors + cosine similarity, not keyword matching
-- **Outcome learning** — tracks routing decisions and their results, builds per-model quality profiles
-- **SLA enforcement** — cost budget alerts, latency targets, quality score tracking per model/tier
-- **Fallback chains** — automatic escalation when cheap models fail
-- **A/B testing** — routes a configurable % to premium models to validate cheap routing
-- **Context-aware** — adjusts routing based on iteration count, conversation length, user expertise
-- **Multi-objective** — optimize for quality, cost, speed, or balanced
-- Runs fully offline — zero network calls, zero tokens, zero API keys
-
-## Demo
-
-```
-Prompt                                                          Tier       Model
-──────────────────────────────────────────────────────────────────────────────────
-What is 2 + 2?                                                  trivial    gpt-4o-mini
-Translate hello to French                                       trivial    gpt-4o-mini
-Write a Python function to reverse a string                     simple     gpt-4o-mini
-Implement a React component with sortable table and pagination  moderate   claude-sonnet
-Write a class that manages a connection pool with retry logic   moderate   claude-sonnet
-Design microservices for e-commerce with 10K users and CQRS     complex    claude-sonnet
-Architect a globally distributed database with CRDTs            expert     claude-opus
-```
-
-Note: "Implement a React component" routes to **moderate**, not trivial. The semantic classifier understands that implementation tasks require real capability, regardless of prompt length.
-
-## Performance
-
-```
-Routing latency: median 0.05ms, p99 0.09ms, avg 0.05ms (cold start)
-Classification: ~50 seed examples across 5 tiers, TF-IDF with cosine similarity
-Memory: <5MB for typical workloads
-Storage: plain JSON files
-```
-
-Measured on Apple M4, Python 3.14.
+---
 
 ## Install
 
@@ -63,7 +27,9 @@ Measured on Apple M4, Python 3.14.
 pip install antaris-router
 ```
 
-## Quick Start — AdaptiveRouter (v2/v3 API)
+---
+
+## Quick Start — AdaptiveRouter (recommended)
 
 ```python
 from antaris_router import AdaptiveRouter, ModelConfig
@@ -98,9 +64,53 @@ print(f"Use {result.model} (tier: {result.tier}, confidence: {result.confidence:
 # Report outcome so the router learns
 router.report_outcome(result.prompt_hash, quality_score=0.9, success=True)
 
-# Save state
 router.save()
 ```
+
+---
+
+## OpenClaw Integration
+
+antaris-router is designed for OpenClaw agent workflows. Drop it into any pipeline to get intelligent model selection without modifying your agent logic.
+
+```python
+from antaris_router import Router
+
+router = Router(config_path="router.json")
+model = router.route(prompt)  # Returns the optimal model for this prompt
+```
+
+Pairs naturally with antaris-guard (pre-routing safety check) and antaris-context (token budget awareness). Both are wired together automatically in **antaris-pipeline**.
+
+---
+
+## What It Does
+
+- **Semantic classification** — TF-IDF vectors + cosine similarity, not keyword matching
+- **Outcome learning** — tracks routing decisions and their results, builds per-model quality profiles
+- **SLA enforcement** — cost budget alerts, latency targets, quality score tracking per model/tier
+- **Fallback chains** — automatic escalation when cheap models fail
+- **A/B testing** — routes a configurable % to premium models to validate cheap routing
+- **Context-aware** — adjusts routing based on iteration count, conversation length, user expertise
+- Runs fully offline — zero network calls, zero tokens, zero API keys
+
+---
+
+## Demo
+
+```
+Prompt                                                          Tier       Model
+──────────────────────────────────────────────────────────────────────────────────
+What is 2 + 2?                                                  trivial    gpt-4o-mini
+Translate hello to French                                       trivial    gpt-4o-mini
+Write a Python function to reverse a string                     simple     gpt-4o-mini
+Implement a React component with sortable table and pagination  moderate   claude-sonnet
+Write a class that manages a connection pool with retry logic   moderate   claude-sonnet
+Design microservices for e-commerce with 10K users and CQRS     complex    claude-sonnet
+Architect a globally distributed database with CRDTs            expert     claude-opus
+```
+
+---
 
 ## SLA Enforcement (v3.0)
 
@@ -132,32 +142,29 @@ if alert['triggered']:
     print(f"⚠️ Budget alert: {alert['message']}")
 ```
 
+---
+
 ## Outcome Learning
 
 The router gets smarter over time. When a cheap model consistently fails on a task type, the router learns to skip it.
 
 ```python
-# Initial routing
-result = router.route("Write a regex to validate emails")
-# → cheap model
-
-# After reporting failures on cheap:
+# Report failures — router learns to escalate this task type
 router.report_outcome(result.prompt_hash, quality_score=0.15, success=False)
 # ... repeat a few times ...
-
-# Router learns to route this task type to a better model automatically
+# Router automatically routes this task type to a better model
 ```
 
-Quality scores are computed per model per tier:
+Quality scores per model per tier:
 ```
 score = 0.4 × success_rate + 0.4 × avg_quality + 0.2 × (1 - escalation_rate)
 ```
 
 Models below the escalation threshold (default 0.30) are automatically skipped.
 
-## Context-Aware Routing
+---
 
-Pass context to influence routing decisions:
+## Context-Aware Routing
 
 ```python
 # First attempt — routes normally
@@ -175,6 +182,8 @@ result = router.route("What do you think?", context={"conversation_length": 15})
 result = router.route("Optimize this", context={"user_expertise": "expert"})
 ```
 
+---
+
 ## Fallback Chains
 
 ```python
@@ -182,10 +191,11 @@ result = router.route("Write unit tests for authentication")
 print(result.model)           # → gpt-4o-mini
 print(result.fallback_chain)  # → ['claude-sonnet', 'claude-opus']
 
-# Escalate if primary model fails:
 next_model = router.escalate(result.prompt_hash)
 print(next_model)  # → claude-sonnet
 ```
+
+---
 
 ## Teaching Corrections
 
@@ -198,6 +208,8 @@ router.teach(
 # Correction is learned permanently
 ```
 
+---
+
 ## Routing Analytics
 
 ```python
@@ -207,9 +219,9 @@ print(f"Tier distribution: {analytics['tier_distribution']}")
 print(f"Cost saved vs all-premium: ${analytics['cost_savings']:.2f}")
 ```
 
-## Works With Local Models (Ollama)
+---
 
-Register Ollama models at `$0.00` cost. The router sends trivial/simple work to local models and reserves cloud APIs for tasks that need them.
+## Works With Local Models (Ollama)
 
 ```python
 router = AdaptiveRouter("./routing_data")
@@ -228,15 +240,11 @@ router.register_model(ModelConfig(
 ))
 ```
 
-**40% of typical requests route to local models ($0.00).** At 1,000 requests/day, that's ~$10.80/day vs ~$18.00/day all-Sonnet.
+40% of typical requests route to local models ($0.00). At 1,000 requests/day, that's ~$10.80/day vs ~$18.00/day all-Sonnet.
 
 The router doesn't call models — it tells you which one to use. Wire it to Ollama's API, LiteLLM, or any client you prefer.
 
-## Semantic Classification
-
-TF-IDF with cosine similarity across ~50 labeled examples, not keyword matching.
-
-**Why not embeddings?** Embeddings would be more accurate but require either an API call (defeats offline goal) or a model file (~100MB+). TF-IDF gets 80% of the benefit with zero dependencies.
+---
 
 ## Tiers
 
@@ -244,9 +252,11 @@ TF-IDF with cosine similarity across ~50 labeled examples, not keyword matching.
 |------|-------------|----------|
 | trivial | One-line answers, lookups | "What is 2+2?", "Define photosynthesis" |
 | simple | Short tasks, basic code | "Reverse a string", "Explain TCP vs UDP" |
-| moderate | Multi-step implementation | "Build a REST API with auth", "Write a caching layer" |
-| complex | Architecture, multi-system | "Design microservices for e-commerce", "Build a custom ORM" |
-| expert | Full system design | "Architect a globally distributed database", "Design HFT platform" |
+| moderate | Multi-step implementation | "Build a REST API with auth" |
+| complex | Architecture, multi-system | "Design microservices for e-commerce" |
+| expert | Full system design | "Architect a globally distributed database" |
+
+---
 
 ## Storage Format
 
@@ -259,12 +269,14 @@ routing_data/
 └── router_config.json       # Model registry and settings
 ```
 
-All plain JSON. Inspect or edit with any text editor.
+Plain JSON. Inspect or edit with any text editor.
+
+---
 
 ## Architecture
 
 ```
-AdaptiveRouter (v2/v3)
+AdaptiveRouter (v2/v3 — recommended)
 ├── SemanticClassifier
 │   └── TFIDFVectorizer     — Term weighting + cosine similarity
 ├── QualityTracker
@@ -274,7 +286,7 @@ AdaptiveRouter (v2/v3)
 ├── FallbackChain           — Ordered model escalation
 └── ABTester                — Validation routing (configurable %)
 
-Router (v1/v3 with SLA)
+Router (v1/v3 with SLA — legacy keyword-based)
 ├── TaskClassifier          — Keyword-based + structural classification
 ├── ModelRegistry           — Model capabilities and cost data
 ├── CostTracker             — Usage records, savings analysis
@@ -282,13 +294,29 @@ Router (v1/v3 with SLA)
 └── ConfidenceRouter        — Score-weighted routing decisions
 ```
 
+---
+
+## Performance
+
+```
+Routing latency: median 0.05ms, p99 0.09ms, avg 0.05ms
+Classification: ~50 seed examples, TF-IDF with cosine similarity
+Memory: <5MB for typical workloads
+```
+
+Measured on Apple M4, Python 3.14.
+
+---
+
 ## What It Doesn't Do
 
 - **Not a proxy** — doesn't forward requests to models. It tells you *which* model to use.
-- **Not semantic search** — no embeddings, no vector DB. Uses TF-IDF (bag-of-words with term weighting).
+- **Not semantic search** — uses TF-IDF (bag-of-words with term weighting), not embeddings.
 - **Not real-time market data** — doesn't track live model pricing or availability.
 - **Classification is statistical, not perfect** — edge cases exist. Use `teach()` to correct them.
-- **Quality tracking requires your feedback** — call `report_outcome()` after using the model, or the router can't learn.
+- **Quality tracking requires your feedback** — call `report_outcome()` after using the model.
+
+---
 
 ## Legacy API
 
@@ -300,7 +328,9 @@ router = Router(config_path="./config")
 decision = router.route("What's 2+2?")
 ```
 
-We recommend `AdaptiveRouter` for new code. Migrate when you're ready — there's no rush.
+We recommend `AdaptiveRouter` for new code.
+
+---
 
 ## Running Tests
 
@@ -311,23 +341,9 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-All 194 tests pass with zero external dependencies (pytest is the only test runner needed).
+All 194 tests pass with zero external dependencies.
 
-## Why Not OpenRouter / LiteLLM?
-
-OpenRouter and LiteLLM are API proxies — they forward requests, handle billing, and rate limit. Antaris Router is a classification library — it tells you which model to use, not how to call it. Zero dependencies, no API keys, fully offline. Use both together if you want: Antaris Router decides, LiteLLM sends.
-
-| | Antaris Router | OpenRouter | LiteLLM | RouteLLM |
-|---|---|---|---|---|
-| Classification | TF-IDF semantic | API proxy | API proxy | Embeddings |
-| Outcome learning | ✅ | ❌ | ❌ | ✅ |
-| SLA enforcement | ✅ | ❌ | ❌ | ❌ |
-| Offline | ✅ | ❌ | ❌ | ❌ |
-| A/B testing | ✅ Built-in | ❌ | ❌ | ❌ |
-| Context-aware | ✅ | ❌ | ❌ | ❌ |
-| Fallback chains | ✅ | ✅ | ✅ | ❌ |
-| Zero dependencies | ✅ | ❌ | ❌ | ❌ |
-| Infrastructure | None | Cloud | Cloud | GPU/API |
+---
 
 ## Part of the Antaris Analytics Suite
 
@@ -335,7 +351,13 @@ OpenRouter and LiteLLM are API proxies — they forward requests, handle billing
 - **antaris-router** — Adaptive model routing with SLA enforcement (this package)
 - **[antaris-guard](https://pypi.org/project/antaris-guard/)** — Security and prompt injection detection
 - **[antaris-context](https://pypi.org/project/antaris-context/)** — Context window optimization
+- **[antaris-pipeline](https://pypi.org/project/antaris-pipeline/)** — Agent orchestration pipeline
 
 ## License
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache 2.0 — see [LICENSE](LICENSE) for details.
+
+---
+
+**Built with ❤️ by Antaris Analytics**  
+*Deterministic infrastructure for AI agents*
