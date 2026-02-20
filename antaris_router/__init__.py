@@ -40,7 +40,7 @@ Sprint 5 — Cost-Performance SLAs:
     result = router.route("Hello", auto_scale=True)
 """
 
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 # v2.0 API — adaptive routing with semantic classification
 # Sprint 2.3 adds RouteDecision and confidence strategy constants
