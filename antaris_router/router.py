@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from dataclasses import dataclass, field
@@ -221,6 +222,10 @@ class Router:
             SLAMonitor(sla) if sla is not None else None
         )
 
+        # Sprint 2.7 — explicit provider health state with TTL
+        # { provider: {"status": str, "latency_ms": float, "expires_at": float} }
+        self._provider_health_state: Dict[str, Dict[str, Any]] = {}
+
     # ── Public routing interface ──────────────────────────────────────────
 
     def route(
@@ -280,20 +285,25 @@ class Router:
             if preferred:
                 suitable_models = preferred
 
-        # ── Health-aware filtering ────────────────────────────────────────
+        # ── Health-aware filtering (Sprint 2.7: explicit status + event tracker) ──
         if prefer_healthy and suitable_models:
-            available = [
+            # First filter out "down" providers (explicit health state takes priority)
+            not_down = [
                 m for m in suitable_models
-                if self._health_tracker.is_available(m.name)
+                if self._get_effective_health_status(m.name) != "down"
+                and self._health_tracker.is_available(m.name)
             ]
-            if available:
-                suitable_models = sorted(
-                    available,
-                    key=lambda m: (
+            if not_down:
+                # Sort: ok before degraded, then by health score, then by cost
+                def _health_sort_key(m):
+                    status = self._get_effective_health_status(m.name)
+                    status_rank = {"ok": 0, "degraded": 1}.get(status, 2)
+                    return (
+                        status_rank,
                         -self._health_tracker.get_health_score(m.name),
                         m.calculate_cost(*estimate_tokens),
-                    ),
-                )
+                    )
+                suitable_models = sorted(not_down, key=_health_sort_key)
             # If all models are "down", fall through to normal ordering
 
         # ── Rate-limit filtering ──────────────────────────────────────────
@@ -489,6 +499,95 @@ class Router:
             recent_errors, last_seen
         """
         return self._health_tracker.get_health(model)
+
+    # Sprint 2.7 ─────────────────────────────────────────────────────────
+
+    def record_provider_health(
+        self,
+        provider: str,
+        status: str,
+        latency_ms: float = 0.0,
+        ttl_seconds: float = 300.0,
+    ) -> None:
+        """Record an explicit health status for a provider/model with TTL.
+
+        This complements :meth:`record_provider_event` with a higher-level
+        ``status`` string that expires after *ttl_seconds* (default 5 min).
+        The health state is consulted during :meth:`route` to avoid "down"
+        providers and de-prioritise "degraded" ones.
+
+        Args:
+            provider: Provider or model name (e.g. ``"claude-haiku-3-5"``).
+            status: ``"ok"`` | ``"degraded"`` | ``"down"``.
+            latency_ms: Observed latency in milliseconds.
+            ttl_seconds: How long this status record is valid (default 300 s).
+
+        Raises:
+            ValueError: If *status* is not one of the accepted values.
+        """
+        _valid = {"ok", "degraded", "down"}
+        if status not in _valid:
+            raise ValueError(f"status must be one of {sorted(_valid)}, got {status!r}")
+
+        self._provider_health_state[provider] = {
+            "status": status,
+            "latency_ms": latency_ms,
+            "recorded_at": time.time(),
+            "expires_at": time.time() + ttl_seconds,
+        }
+
+        # Mirror into the underlying event tracker so existing health queries
+        # stay consistent (record_provider_event uses event-level details).
+        event_map = {"ok": "success", "degraded": "success", "down": "error"}
+        details_map = {"ok": None, "degraded": "degraded", "down": "provider_down"}
+        self.record_provider_event(
+            model=provider,
+            event=event_map[status],
+            details=details_map[status],
+            latency_ms=latency_ms if latency_ms > 0 else None,
+        )
+
+    def get_provider_health_state(self, provider: str) -> Dict[str, Any]:
+        """Return the explicit health state for *provider*, or ``None`` if unknown/expired.
+
+        The state expires after the TTL set during :meth:`record_provider_health`.
+        Expired records are removed lazily on access.
+
+        Returns:
+            Dict with keys ``status``, ``latency_ms``, ``recorded_at``,
+            ``expires_at``, or ``None`` if no valid state exists.
+        """
+        state = self._provider_health_state.get(provider)
+        if state is None:
+            return {"status": "unknown", "provider": provider}
+        if time.time() > state["expires_at"]:
+            # Expire it lazily
+            del self._provider_health_state[provider]
+            return {"status": "unknown", "provider": provider}
+        return {"provider": provider, **state}
+
+    def _get_effective_health_status(self, model: str) -> str:
+        """Return the effective health status for routing decisions.
+
+        Checks explicit TTL-based state first, falls back to event-based
+        tracker, returns ``"ok"`` if no information is available.
+        """
+        state = self._provider_health_state.get(model)
+        if state is not None:
+            if time.time() <= state["expires_at"]:
+                return state["status"]
+            # Expired — clean up
+            del self._provider_health_state[model]
+
+        # Fall back to event-based tracker
+        health = self._health_tracker.get_health(model)
+        tracker_status = health.get("status", "ok")
+        # Map tracker's vocabulary to our three-tier system
+        if tracker_status in ("rate_limited", "unavailable"):
+            return "down"
+        if tracker_status == "degraded":
+            return "degraded"
+        return "ok"
 
     # ── Cost forecasting ──────────────────────────────────────────────────
 

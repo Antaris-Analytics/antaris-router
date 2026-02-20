@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+## [3.2.0] - 2026-02-20
+
+### Added — Sprint 2.7: Provider Health Tracking
+
+- **`Router.record_provider_health(provider, status, latency_ms, ttl_seconds=300)`** — record explicit health status with 5-minute TTL
+  - `"ok"` → provider is healthy, prefer in routing
+  - `"degraded"` → provider has issues, deprioritise in routing
+  - `"down"` → provider is unavailable, skip entirely in routing
+  - Mirrors into `ProviderHealthTracker` for consistent `get_provider_health()` responses
+- **`Router.get_provider_health_state(provider)`** — return the TTL-based explicit state; returns `{"status": "unknown"}` if expired or not set
+- **`Router._get_effective_health_status(model)`** — internal helper that checks TTL state first, falls back to event-based tracker
+- **Health-aware routing enhanced** — `route(prefer_healthy=True)` now also excludes `"down"` models by explicit state, and sorts `"degraded"` below `"ok"` in the candidate list
+- 229 existing tests continue to pass (no regressions)
+
 ## [3.1.0] - 2026-02-20
 
 ### Added — Sprint 2.3: Confidence-Gated Routing
