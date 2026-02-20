@@ -28,4 +28,4 @@ jobs:
           pip install -e .
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest . -v --ignore=examples --ignore=docs

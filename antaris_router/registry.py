@@ -6,11 +6,14 @@ Provides methods to query models by tier and sort by cost.
 """
 
 import json
+import logging
 import os
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Config
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,6 +26,7 @@ class ModelInfo:
     capabilities: List[str]
     max_tokens: int
     tier: List[str]
+    supports_streaming: bool = True
     
     def calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Calculate cost for given token usage.
@@ -88,7 +92,8 @@ class ModelRegistry:
                 cost_per_1k_output=model_def['cost_per_1k_output'],
                 capabilities=model_def['capabilities'],
                 max_tokens=model_def['max_tokens'],
-                tier=model_def['tier']
+                tier=model_def['tier'],
+                supports_streaming=model_def.get('supports_streaming', True),
             )
             models[model.name] = model
         return models
@@ -178,7 +183,8 @@ class ModelRegistry:
             'cost_per_1k_output': model_info.cost_per_1k_output,
             'capabilities': model_info.capabilities,
             'max_tokens': model_info.max_tokens,
-            'tier': model_info.tier
+            'tier': model_info.tier,
+            'supports_streaming': model_info.supports_streaming,
         }
         self.config.add_model(model_def)
     
@@ -278,23 +284,33 @@ class ModelRegistry:
                 'cost_per_1k_output': model.cost_per_1k_output,
                 'capabilities': model.capabilities,
                 'max_tokens': model.max_tokens,
-                'tier': model.tier
+                'tier': model.tier,
+                'supports_streaming': model.supports_streaming,
             }
             data['models'].append(model_data)
-        
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         from .utils import atomic_write_json
         atomic_write_json(file_path, data)
     
     def load_from_file(self, file_path: str) -> None:
         """Load registry from a JSON file.
-        
+
         Args:
             file_path: Path to load the registry from
         """
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+        except Exception as exc:
+            _log.warning(
+                "Could not load model registry from %s: %s — keeping current state",
+                file_path, exc,
+            )
+            return
+
         self.models = {}
         for model_def in data.get('models', []):
             model = ModelInfo(
@@ -304,6 +320,7 @@ class ModelRegistry:
                 cost_per_1k_output=model_def['cost_per_1k_output'],
                 capabilities=model_def['capabilities'],
                 max_tokens=model_def['max_tokens'],
-                tier=model_def['tier']
+                tier=model_def['tier'],
+                supports_streaming=model_def.get('supports_streaming', True),
             )
             self.models[model.name] = model

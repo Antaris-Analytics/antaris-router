@@ -7,7 +7,7 @@ and savings estimates compared to always using premium models.
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
@@ -59,7 +59,7 @@ class CostTracker:
         actual_cost = model.calculate_cost(input_tokens, output_tokens)
         
         record = UsageRecord(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             model_name=model.name,
             tier=tier,
             input_tokens=input_tokens,
@@ -302,8 +302,8 @@ class CostTracker:
         Returns:
             Cutoff datetime
         """
-        now = datetime.utcnow()
-        
+        now = datetime.now(timezone.utc)
+
         if period == "day":
             return now - timedelta(days=1)
         elif period == "week":
@@ -311,17 +311,19 @@ class CostTracker:
         elif period == "month":
             return now - timedelta(days=30)
         else:
-            return datetime.min
+            return datetime.min.replace(tzinfo=timezone.utc)
     
     def save(self) -> None:
         """Save usage history to storage file."""
         data = {
             "version": "1.0.0",
-            "saved_at": datetime.utcnow().isoformat(),
+            "saved_at": datetime.now(timezone.utc).isoformat(),
             "usage_history": [asdict(record) for record in self.usage_history]
         }
-        
-        os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
+
+        dir_path = os.path.dirname(self.storage_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         from .utils import atomic_write_json
         atomic_write_json(self.storage_path, data)
     

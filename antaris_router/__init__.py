@@ -31,12 +31,30 @@ Usage:
 Legacy v1 API (keyword-based) is still available:
     from antaris_router import Router
     router = Router("./config")
+
+Sprint 5 — Cost-Performance SLAs:
+    from antaris_router import Router, SLAConfig
+
+    sla = SLAConfig(max_latency_ms=200, budget_per_hour_usd=5.00)
+    router = Router(sla=sla, fallback_chain=["claude-opus-4-6", "claude-haiku-3-5"])
+    result = router.route("Hello", auto_scale=True)
 """
 
-__version__ = "2.0.0"
+__version__ = "3.1.0"
 
 # v2.0 API — adaptive routing with semantic classification
-from .adaptive import AdaptiveRouter, RoutingResult, ModelConfig
+# Sprint 2.3 adds RouteDecision and confidence strategy constants
+from .adaptive import (
+    AdaptiveRouter,
+    RoutingResult,
+    ModelConfig,
+    RouteDecision,
+    STRATEGY_ESCALATE,
+    STRATEGY_SAFE_DEFAULT,
+    STRATEGY_CLARIFY,
+    VALID_CONFIDENCE_STRATEGIES,
+    DEFAULT_CONFIDENCE_THRESHOLD,
+)
 from .semantic import SemanticClassifier, SemanticResult, TFIDFVectorizer
 from .quality import QualityTracker, RoutingDecision as QualityDecision
 
@@ -46,6 +64,9 @@ from .classifier import TaskClassifier, ClassificationResult
 from .registry import ModelRegistry, ModelInfo
 from .costs import CostTracker, UsageRecord
 from .config import Config
+
+# Sprint 5 — SLA
+from .sla import SLAConfig, SLAMonitor, SLARecord
 
 __all__ = [
     # v2.0
@@ -57,7 +78,14 @@ __all__ = [
     "TFIDFVectorizer",
     "QualityTracker",
     "QualityDecision",
-    
+    # Sprint 2.3 — confidence-gated routing
+    "RouteDecision",
+    "STRATEGY_ESCALATE",
+    "STRATEGY_SAFE_DEFAULT",
+    "STRATEGY_CLARIFY",
+    "VALID_CONFIDENCE_STRATEGIES",
+    "DEFAULT_CONFIDENCE_THRESHOLD",
+
     # v1.0 (legacy)
     "Router",
     "RoutingDecision",
@@ -68,4 +96,9 @@ __all__ = [
     "CostTracker",
     "UsageRecord",
     "Config",
+
+    # Sprint 5 — SLA
+    "SLAConfig",
+    "SLAMonitor",
+    "SLARecord",
 ]

@@ -7,12 +7,15 @@ All file-based, zero external dependencies.
 """
 
 import json
+import logging
 import math
 import os
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -330,15 +333,28 @@ class SemanticClassifier:
 
     def _load(self):
         """Load saved examples and model."""
-        with open(self._examples_path) as f:
-            self.examples = json.load(f)
-        with open(self._model_path) as f:
-            self.vectorizer = TFIDFVectorizer.from_dict(json.load(f))
-        
-        # Rebuild example vectors
-        self.example_vectors = {}
-        for tier, exs in self.examples.items():
-            self.example_vectors[tier] = [self.vectorizer.transform(e) for e in exs]
+        try:
+            with open(self._examples_path) as f:
+                self.examples = json.load(f)
+        except Exception as exc:
+            _log.warning(
+                "Could not load routing examples from %s: %s — using seed examples",
+                self._examples_path, exc,
+            )
+            self.examples = {tier: list(exs) for tier, exs in SEED_EXAMPLES.items()}
+
+        try:
+            with open(self._model_path) as f:
+                self.vectorizer = TFIDFVectorizer.from_dict(json.load(f))
+        except Exception as exc:
+            _log.warning(
+                "Could not load routing model from %s: %s — rebuilding from examples",
+                self._model_path, exc,
+            )
+            self.vectorizer = TFIDFVectorizer()
+
+        # Rebuild example vectors from whatever examples we have
+        self._rebuild_model()
 
     def get_stats(self) -> Dict:
         """Get classifier statistics."""

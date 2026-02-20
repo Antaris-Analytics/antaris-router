@@ -166,4 +166,5 @@ config.json
 # Test artifacts
 .pytest_cache/
 test_*.json
-temp_*
+temp_**.pyc
+*.pyo

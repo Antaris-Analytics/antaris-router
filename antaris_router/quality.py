@@ -6,11 +6,15 @@ best for which types of tasks. All file-based, zero dependencies.
 """
 
 import json
+import logging
 import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,24 +42,39 @@ class QualityTracker:
     All data stored in plain JSON files.
     """
 
-    def __init__(self, workspace: str = "."):
+    def __init__(self, workspace: str = ".", max_age_days: int = 90):
         self.workspace = os.path.abspath(workspace)
         self._decisions_path = os.path.join(workspace, "routing_decisions.json")
         self._profiles_path = os.path.join(workspace, "model_profiles.json")
-        
+        self.max_age_days = max_age_days
+
         self.decisions: List[Dict] = []
         self.profiles: Dict[str, Dict] = {}  # model -> tier -> stats
-        
+
         self._load()
 
     def _load(self):
         """Load existing tracking data."""
         if os.path.exists(self._decisions_path):
-            with open(self._decisions_path) as f:
-                self.decisions = json.load(f)
+            try:
+                with open(self._decisions_path) as f:
+                    self.decisions = json.load(f)
+            except Exception as exc:
+                _log.warning(
+                    "Could not load routing decisions from %s: %s — starting empty",
+                    self._decisions_path, exc,
+                )
+                self.decisions = []
         if os.path.exists(self._profiles_path):
-            with open(self._profiles_path) as f:
-                self.profiles = json.load(f)
+            try:
+                with open(self._profiles_path) as f:
+                    self.profiles = json.load(f)
+            except Exception as exc:
+                _log.warning(
+                    "Could not load model profiles from %s: %s — starting empty",
+                    self._profiles_path, exc,
+                )
+                self.profiles = {}
 
     def save(self):
         """Persist tracking data to disk."""
@@ -147,30 +166,66 @@ class QualityTracker:
 
     def get_model_score(self, model: str, tier: str) -> float:
         """Get a composite quality score for a model on a tier.
-        
+
         Returns 0.0-1.0 where higher is better. Factors in:
         - Success rate (40%)
         - Average quality (40%)
         - Escalation rate (20%, inverted — fewer escalations is better)
-        
+
+        Only decisions within the last ``max_age_days`` days are considered.
         Returns 0.5 (neutral) if no data available.
         """
-        if model not in self.profiles or tier not in self.profiles[model]:
-            return 0.5  # No data, neutral score
-        
-        stats = self.profiles[model][tier]
-        if stats['total'] == 0:
-            return 0.5
-        
-        # Success rate
-        success_rate = stats['successes'] / max(stats['total'], 1)
-        
-        # Average quality (default 0.5 if no samples)
-        quality = stats['avg_quality'] if stats['quality_samples'] > 0 else 0.5
-        
-        # Escalation rate (inverted — 0 escalations = 1.0)
-        escalation_rate = 1.0 - (stats['escalations'] / max(stats['total'], 1))
-        
+        cutoff_ts = (
+            datetime.now(timezone.utc) - timedelta(days=self.max_age_days)
+        ).timestamp()
+
+        # Build a fresh stats snapshot from time-windowed decisions
+        total = 0
+        successes = 0
+        failures = 0
+        escalations = 0
+        quality_sum = 0.0
+        quality_count = 0
+
+        for d in self.decisions:
+            if d.get('model') != model or d.get('tier') != tier:
+                continue
+            ts = d.get('timestamp', 0)
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts).timestamp()
+                except Exception:
+                    ts = 0.0
+            if ts < cutoff_ts:
+                continue
+            total += 1
+            if d.get('success') is True:
+                successes += 1
+            elif d.get('success') is False:
+                failures += 1
+            if d.get('escalated'):
+                escalations += 1
+            qs = d.get('quality_score')
+            if qs is not None:
+                quality_sum += float(qs)
+                quality_count += 1
+
+        if total == 0:
+            # Fall back to profile aggregates if no windowed decisions exist
+            if model not in self.profiles or tier not in self.profiles[model]:
+                return 0.5
+            stats = self.profiles[model][tier]
+            if stats['total'] == 0:
+                return 0.5
+            success_rate = stats['successes'] / max(stats['total'], 1)
+            quality = stats['avg_quality'] if stats['quality_samples'] > 0 else 0.5
+            escalation_rate = 1.0 - (stats['escalations'] / max(stats['total'], 1))
+            return 0.4 * success_rate + 0.4 * quality + 0.2 * escalation_rate
+
+        success_rate = successes / total
+        quality = (quality_sum / quality_count) if quality_count > 0 else 0.5
+        escalation_rate = 1.0 - (escalations / total)
+
         return 0.4 * success_rate + 0.4 * quality + 0.2 * escalation_rate
 
     def recommend_model(self, tier: str, candidates: List[str],

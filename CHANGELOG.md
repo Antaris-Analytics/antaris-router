@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+## [3.1.0] - 2026-02-20
+
+### Added — Sprint 2.3: Confidence-Gated Routing
+
+- **`RouteDecision` dataclass** — `AdaptiveRouter.route_with_confidence()` now returns a
+  `RouteDecision` with `confidence` (0.0–1.0), `basis` (semantic_classifier / quality_tracker /
+  composite), `reason` (human-readable), and `strategy_applied` fields.
+- **Low-confidence strategies** (configurable via `confidence_strategy` constructor arg):
+  - `"escalate"` — bumps routing to the next tier when confidence < threshold.
+  - `"safe_default"` — routes to a configured fallback model on low confidence.
+  - `"clarify"` — keeps routing but sets `strategy_applied="clarify"` to signal ambiguity.
+  - Default threshold: 0.6 (exposed as `DEFAULT_CONFIDENCE_THRESHOLD`).
+- **`AdaptiveRouter.explain(request)`** — read-only method returning a structured dict with
+  classification result, quality scores, cost estimate, candidate models, `why_selected` map,
+  and a human-readable `summary`. Does not record a routing decision.
+- **Backward compatible** — `route()` return type (`RoutingResult`) and all existing fields
+  unchanged; callers using only `result.model` require zero migration.
+- **35 new tests** in `tests/test_confidence.py` covering all strategies, `explain()`,
+  `RouteDecision.to_dict()`, error handling, and backward compatibility (229 total, all passing).
+
+## [3.0.0] - 2026-02-18
+
+### Added — Antaris Suite 2.0 GA
+- **SLA Monitor** — cost budget enforcement, quality score tracking per model/tier, `get_sla_report()`, `check_budget_alert()`
+- **Confidence Routing** — `ConfidenceRouter`, scoring with `RoutingDecision.confidence_basis` for cross-package tracing
+- **Sprint 7 backward compat** — `RoutingDecision.to_dict()` extended fields; `SLAConfig` optional; safe defaults throughout
+- **194 unit tests** (all passing); all Sprint 7 SLA params verified backward-compatible
+- Suite integration: router hints consumed by `antaris-context` `set_router_hints()` for adaptive budget allocation
+
 ## [2.0.0] - 2026-02-16
 
 ### Added (Complete Routing Rewrite)

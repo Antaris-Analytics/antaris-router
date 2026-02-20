@@ -5,11 +5,16 @@ Combines semantic classification, quality tracking, and context awareness
 into an intelligent routing system that learns and improves over time.
 Supports fallback chains, A/B testing, and multi-objective optimization.
 
+Sprint 2.3: Confidence-gated routing with escalate/safe_default/clarify
+strategies, RouteDecision dataclass with explainability, and explain()
+method that returns structured decision analysis from a request string.
+
 Zero external dependencies. All state is file-based.
 """
 
 import hashlib
 import json
+import logging
 import os
 import random
 import time
@@ -18,6 +23,68 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .semantic import SemanticClassifier, SemanticResult
 from .quality import QualityTracker, RoutingDecision
+from .confidence import (
+    ProviderHealthTracker,
+    CONFIDENCE_BASIS_SEMANTIC,
+    CONFIDENCE_BASIS_QUALITY,
+    CONFIDENCE_BASIS_COMPOSITE,
+)
+
+_log = logging.getLogger(__name__)
+
+# ── Confidence strategy constants ─────────────────────────────────────────────
+STRATEGY_ESCALATE     = "escalate"
+STRATEGY_SAFE_DEFAULT = "safe_default"
+STRATEGY_CLARIFY      = "clarify"
+
+VALID_CONFIDENCE_STRATEGIES = {STRATEGY_ESCALATE, STRATEGY_SAFE_DEFAULT, STRATEGY_CLARIFY}
+
+# Default confidence threshold for low-confidence strategies
+DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+
+
+@dataclass
+class RouteDecision:
+    """Enhanced routing decision for Sprint 2.3 — confidence-gated routing.
+
+    Attributes:
+        model: Selected model name.
+        tier: Complexity tier (trivial/simple/moderate/complex/expert).
+        confidence: Routing confidence 0.0–1.0.
+        basis: How confidence was determined
+            (semantic_classifier / quality_tracker / composite / rule_based).
+        reason: Human-readable explanation of the routing choice.
+        strategy_applied: None when routing proceeded normally;
+            ``"escalated"``, ``"safe_default"``, or ``"clarify"`` when the
+            low-confidence strategy fired.
+        fallback_chain: Ordered list of alternative models.
+        prompt_hash: MD5 prefix of the original prompt (for outcome tracking).
+        metadata: Additional signals from the classification step.
+    """
+
+    model: str
+    tier: str
+    confidence: float
+    basis: str
+    reason: str
+    strategy_applied: Optional[str]  # None | "escalated" | "safe_default" | "clarify"
+    fallback_chain: List[str] = field(default_factory=list)
+    prompt_hash: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to plain dict (Pipeline telemetry-ready)."""
+        return {
+            "model": self.model,
+            "tier": self.tier,
+            "confidence": self.confidence,
+            "basis": self.basis,
+            "reason": self.reason,
+            "strategy_applied": self.strategy_applied,
+            "fallback_chain": self.fallback_chain,
+            "prompt_hash": self.prompt_hash,
+            "metadata": self.metadata,
+        }
 
 
 @dataclass
@@ -33,7 +100,7 @@ class RoutingResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass  
+@dataclass
 class ModelConfig:
     """Configuration for a model in the routing registry."""
     name: str
@@ -44,6 +111,7 @@ class ModelConfig:
     max_context: int = 128000
     provider: str = ""
     tags: List[str] = field(default_factory=list)
+    supports_streaming: bool = True
 
 
 # Tier ordering for comparison
@@ -63,18 +131,55 @@ class AdaptiveRouter:
     - All file-based, all deterministic (given same state)
     """
 
-    def __init__(self, workspace: str = ".", ab_test_rate: float = 0.05):
+    def __init__(
+        self,
+        workspace: str = ".",
+        ab_test_rate: float = 0.05,
+        # ── Sprint 2.3: confidence-gated routing ──────────────────────────
+        confidence_threshold: float = 0.0,
+        confidence_strategy: Optional[str] = None,
+        safe_default_model: Optional[str] = None,
+    ):
         """Initialize the adaptive router.
-        
+
         Args:
-            workspace: Directory for persistent state files
-            ab_test_rate: Fraction of requests to route to premium for validation (0.0-1.0)
+            workspace: Directory for persistent state files.
+            ab_test_rate: Fraction of requests to route to premium for
+                validation (0.0–1.0).
+            confidence_threshold: When confidence falls below this value
+                the ``confidence_strategy`` fires.  Set to ``0.0``
+                (default) to disable confidence-gating.
+            confidence_strategy: One of ``"escalate"``, ``"safe_default"``,
+                or ``"clarify"``.  Required when ``confidence_threshold > 0``.
+
+                - ``"escalate"`` — bump to the next model tier.
+                - ``"safe_default"`` — route to ``safe_default_model``.
+                - ``"clarify"`` — keep the routing but set
+                  ``strategy_applied="clarify"`` so callers know the
+                  request needs clarification.
+
+            safe_default_model: Model name to use when
+                ``confidence_strategy="safe_default"`` and confidence is
+                low.  Ignored for other strategies.
         """
+        if confidence_strategy is not None and confidence_strategy not in VALID_CONFIDENCE_STRATEGIES:
+            raise ValueError(
+                f"confidence_strategy must be one of "
+                f"{sorted(VALID_CONFIDENCE_STRATEGIES)}, "
+                f"got {confidence_strategy!r}"
+            )
+
         self.workspace = os.path.abspath(workspace)
         self.classifier = SemanticClassifier(workspace)
         self.tracker = QualityTracker(workspace)
         self.ab_test_rate = ab_test_rate
-        
+        self._health_tracker = ProviderHealthTracker()
+
+        # Sprint 2.3
+        self.confidence_threshold: float = confidence_threshold
+        self.confidence_strategy: Optional[str] = confidence_strategy
+        self.safe_default_model: Optional[str] = safe_default_model
+
         self.models: Dict[str, ModelConfig] = {}
         self._config_path = os.path.join(workspace, "router_config.json")
         self._load_config()
@@ -82,8 +187,9 @@ class AdaptiveRouter:
     def _load_config(self):
         """Load router configuration."""
         if os.path.exists(self._config_path):
-            with open(self._config_path) as f:
-                data = json.load(f)
+            try:
+                with open(self._config_path) as f:
+                    data = json.load(f)
                 for name, cfg in data.get('models', {}).items():
                     self.models[name] = ModelConfig(
                         name=name,
@@ -94,8 +200,22 @@ class AdaptiveRouter:
                         max_context=cfg.get('max_context', 128000),
                         provider=cfg.get('provider', ''),
                         tags=cfg.get('tags', []),
+                        supports_streaming=cfg.get('supports_streaming', True),
                     )
                 self.ab_test_rate = data.get('ab_test_rate', self.ab_test_rate)
+            except json.JSONDecodeError as exc:
+                # Config file exists but is malformed — hard fail rather than
+                # silently routing with zero models (Gemini review fix).
+                raise ValueError(
+                    f"Router config at {self._config_path} is corrupt (invalid JSON): {exc}. "
+                    "Delete or repair the file to reset to defaults."
+                ) from exc
+            except Exception as exc:
+                _log.warning(
+                    "Could not load router config from %s: %s — using empty config",
+                    self._config_path, exc,
+                )
+                self.models = {}
 
     def register_model(self, config: ModelConfig):
         """Register a model for routing.
@@ -119,6 +239,7 @@ class AdaptiveRouter:
                     'max_context': cfg.max_context,
                     'provider': cfg.provider,
                     'tags': cfg.tags,
+                    'supports_streaming': cfg.supports_streaming,
                 }
                 for name, cfg in self.models.items()
             },
@@ -167,6 +288,21 @@ class AdaptiveRouter:
             # Fall back to any model
             eligible = list(self.models.keys())
             reasoning.append("No tier-specific models; using all available")
+
+        # Filter out rate-limited models
+        non_rate_limited = [
+            m for m in eligible
+            if not self._health_tracker.is_rate_limited(m)
+        ]
+        if non_rate_limited:
+            if len(non_rate_limited) < len(eligible):
+                skipped = set(eligible) - set(non_rate_limited)
+                reasoning.append(
+                    f"Skipping rate-limited model(s): {', '.join(sorted(skipped))}"
+                )
+            eligible = non_rate_limited
+        else:
+            reasoning.append("All eligible models are rate-limited; using full set")
         
         # Step 4: Check quality history — skip models with poor track record
         filtered = []
@@ -240,12 +376,239 @@ class AdaptiveRouter:
             }
         )
 
+    # ── Sprint 2.3: confidence-gated routing ──────────────────────────────
+
+    def route_with_confidence(
+        self,
+        prompt: str,
+        context: Dict = None,
+        optimize: str = "balanced",
+    ) -> RouteDecision:
+        """Route a prompt and return a :class:`RouteDecision` with confidence metadata.
+
+        Applies the configured ``confidence_strategy`` when confidence falls
+        below ``confidence_threshold``.
+
+        Args:
+            prompt: The prompt text.
+            context: Optional context dict (same keys as :meth:`route`).
+            optimize: Optimization goal — ``"quality"``, ``"cost"``,
+                ``"speed"``, or ``"balanced"``.
+
+        Returns:
+            :class:`RouteDecision` with model, tier, confidence, basis,
+            reason, strategy_applied, and fallback_chain.
+        """
+        # Delegate core routing to the existing route() method
+        base = self.route(prompt, context=context, optimize=optimize)
+
+        # Determine confidence basis
+        basis = self._determine_basis(base)
+
+        # Build initial reason string
+        reason_parts = [
+            f"Semantic classification: {base.tier} tier "
+            f"(confidence {base.confidence:.2f})"
+        ]
+        if base.reasoning:
+            reason_parts.extend(base.reasoning[1:])  # skip duplicate first entry
+        reason = "; ".join(reason_parts[:3])  # keep it concise
+
+        strategy_applied: Optional[str] = None
+
+        # Apply low-confidence strategy if configured
+        if (
+            self.confidence_threshold > 0.0
+            and base.confidence < self.confidence_threshold
+            and self.confidence_strategy is not None
+        ):
+            if self.confidence_strategy == STRATEGY_ESCALATE:
+                escalated_model = self._escalate_model(base.model, base.tier)
+                if escalated_model and escalated_model != base.model:
+                    orig_confidence = base.confidence
+                    orig_model = base.model
+                    base = self.route(prompt, context=context, optimize="quality")
+                    # Re-derive basis/reason from new result but keep strategy marker
+                    basis = self._determine_basis(base)
+                    reason = (
+                        f"Escalated from {orig_model!r}: low confidence "
+                        f"({orig_confidence:.2f} < {self.confidence_threshold:.2f}); "
+                        f"using {base.model} for {base.tier} tier"
+                    )
+                strategy_applied = STRATEGY_ESCALATE
+
+            elif self.confidence_strategy == STRATEGY_SAFE_DEFAULT:
+                if self.safe_default_model:
+                    reason = (
+                        f"Safe default applied: low confidence "
+                        f"({base.confidence:.2f} < {self.confidence_threshold:.2f}); "
+                        f"routing to configured fallback {self.safe_default_model!r}"
+                    )
+                    # Return a decision pointing at the safe default
+                    return RouteDecision(
+                        model=self.safe_default_model,
+                        tier=base.tier,
+                        confidence=base.confidence,
+                        basis=basis,
+                        reason=reason,
+                        strategy_applied=STRATEGY_SAFE_DEFAULT,
+                        fallback_chain=base.fallback_chain,
+                        prompt_hash=base.prompt_hash,
+                        metadata=base.metadata,
+                    )
+                strategy_applied = STRATEGY_SAFE_DEFAULT
+
+            elif self.confidence_strategy == STRATEGY_CLARIFY:
+                reason = (
+                    f"Clarification needed: confidence {base.confidence:.2f} < "
+                    f"threshold {self.confidence_threshold:.2f}; "
+                    f"model {base.model!r} selected but input may be ambiguous"
+                )
+                strategy_applied = STRATEGY_CLARIFY
+
+        return RouteDecision(
+            model=base.model,
+            tier=base.tier,
+            confidence=base.confidence,
+            basis=basis,
+            reason=reason,
+            strategy_applied=strategy_applied,
+            fallback_chain=base.fallback_chain,
+            prompt_hash=base.prompt_hash,
+            metadata=base.metadata,
+        )
+
+    def explain(self, request: str, context: Dict = None) -> Dict[str, Any]:
+        """Return a structured explanation of how *request* would be routed.
+
+        Unlike :meth:`route_with_confidence` this method is **read-only** —
+        it does not record a decision in the quality tracker.
+
+        Args:
+            request: The prompt text to explain.
+            context: Optional context dict.
+
+        Returns:
+            Dict with keys:
+                - ``classification``: tier, confidence, tier_scores
+                - ``quality_scores``: per-model quality score for candidate models
+                - ``cost_estimate``: cheapest candidate model and its cost/1K tokens
+                - ``candidates``: list of candidate model names for the tier
+                - ``why_selected``: dict explaining why each candidate was or wasn't chosen
+                - ``summary``: human-readable multi-line explanation string
+        """
+        classification = self.classifier.classify(request)
+        tier = classification.tier
+
+        # Cost estimate: cost-per-1k-input for eligible models
+        eligible = self._eligible_models(tier)
+        cost_estimate: Dict[str, Any] = {}
+        if eligible:
+            cheapest = min(
+                eligible,
+                key=lambda m: self.models[m].cost_per_1k_input
+                if m in self.models else 0.0,
+                default=None,
+            )
+            if cheapest and cheapest in self.models:
+                cfg = self.models[cheapest]
+                cost_estimate = {
+                    "model": cheapest,
+                    "cost_per_1k_input": cfg.cost_per_1k_input,
+                    "cost_per_1k_output": cfg.cost_per_1k_output,
+                }
+
+        # Quality scores for eligible candidates
+        quality_scores: Dict[str, float] = {
+            m: round(self.tracker.get_model_score(m, tier), 4)
+            for m in eligible
+        }
+
+        # Why each candidate was/wasn't selected
+        why_selected: Dict[str, str] = {}
+        for m in eligible:
+            score = quality_scores.get(m, 0.5)
+            if self.tracker.should_escalate(m, tier):
+                why_selected[m] = f"skipped — quality score {score:.2f} below threshold"
+            else:
+                why_selected[m] = f"eligible — quality score {score:.2f}"
+
+        # Summary
+        conf_pct = int(round(classification.confidence * 100))
+        basis = self._determine_basis_from_classification(classification)
+        lines = [
+            f"Request classified as '{tier}' tier ({conf_pct}% confidence, basis: {basis}).",
+            f"Eligible models: {', '.join(eligible) if eligible else 'none registered'}.",
+        ]
+        if cost_estimate:
+            lines.append(
+                f"Cheapest candidate: {cost_estimate['model']} "
+                f"(${cost_estimate['cost_per_1k_input']:.5f}/1K input, "
+                f"${cost_estimate['cost_per_1k_output']:.5f}/1K output)."
+            )
+        if self.confidence_threshold > 0.0 and self.confidence_strategy:
+            if classification.confidence < self.confidence_threshold:
+                lines.append(
+                    f"Confidence {classification.confidence:.2f} < threshold "
+                    f"{self.confidence_threshold:.2f}: strategy '{self.confidence_strategy}' "
+                    f"would fire."
+                )
+            else:
+                lines.append(
+                    f"Confidence {classification.confidence:.2f} >= threshold "
+                    f"{self.confidence_threshold:.2f}: normal routing."
+                )
+
+        return {
+            "classification": {
+                "tier": tier,
+                "confidence": round(classification.confidence, 4),
+                "tier_scores": classification.signals.get("tier_scores", {}),
+            },
+            "quality_scores": quality_scores,
+            "cost_estimate": cost_estimate,
+            "candidates": eligible,
+            "why_selected": why_selected,
+            "summary": "\n".join(lines),
+        }
+
+    # ── Sprint 2.3 private helpers ─────────────────────────────────────────
+
+    def _determine_basis(self, result: "RoutingResult") -> str:
+        """Choose the confidence basis label for a RoutingResult."""
+        has_quality_data = any(
+            self.tracker.get_model_score(result.model, result.tier) != 0.5
+            for _ in [1]  # single-iteration to call once
+        )
+        if has_quality_data:
+            return CONFIDENCE_BASIS_COMPOSITE
+        return CONFIDENCE_BASIS_SEMANTIC
+
+    def _determine_basis_from_classification(self, classification: "SemanticResult") -> str:
+        """Choose the confidence basis from a raw SemanticResult."""
+        return CONFIDENCE_BASIS_SEMANTIC
+
+    def _escalate_model(self, current_model: str, current_tier: str) -> Optional[str]:
+        """Return the next-tier-up model name, or None if already at max."""
+        tier_list = ["trivial", "simple", "moderate", "complex", "expert"]
+        try:
+            idx = tier_list.index(current_tier)
+        except ValueError:
+            idx = 2
+        for higher_tier in tier_list[idx + 1:]:
+            candidates = self._eligible_models(higher_tier)
+            if candidates:
+                return candidates[0]
+        return None
+
+    # ── End Sprint 2.3 ────────────────────────────────────────────────────
+
     def report_outcome(self, prompt_hash: str, quality_score: float = None,
                        success: bool = None, latency_ms: float = None):
         """Report the outcome of a routing decision.
-        
+
         Call this after using the routed model to help the router learn.
-        
+
         Args:
             prompt_hash: The prompt_hash from RoutingResult
             quality_score: 0.0-1.0 quality rating
@@ -276,22 +639,23 @@ class AdaptiveRouter:
                 decision['escalated'] = True
                 current_model = decision['model']
                 tier = decision['tier']
-                
-                # Find next model in capability order
+
+                # Find next model in capability order — only within eligible set
                 eligible = self._eligible_models(tier)
                 current_idx = TIER_ORDER.get(tier, 2)
-                
-                # Try the next tier up
+
+                # Try the next tier up, filtering to eligible models only
                 for higher_tier in ['moderate', 'complex', 'expert']:
                     if TIER_ORDER[higher_tier] > current_idx:
-                        for model_name, config in self.models.items():
+                        for model_name in eligible:
                             if model_name != current_model:
+                                config = self.models[model_name]
                                 min_tier = TIER_ORDER.get(config.tier_range[0], 0)
                                 max_tier = TIER_ORDER.get(config.tier_range[1], 4)
                                 if min_tier <= TIER_ORDER[higher_tier] <= max_tier:
                                     return model_name
                 break
-        
+
         return None
 
     def teach(self, prompt: str, correct_tier: str):
