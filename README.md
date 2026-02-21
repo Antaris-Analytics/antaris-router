@@ -2,28 +2,24 @@
 
 **Adaptive model router for LLM cost optimization. Learns from outcomes. Zero dependencies.**
 
-Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. Enforces cost/latency SLAs. All state stored in plain JSON files. No API keys, no vector database, no infrastructure.
+Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. Enforces cost/latency SLAs. Provider health tracking with TTL-based status. A/B testing for routing strategy validation. All state stored in plain JSON files. No API keys, no vector database, no infrastructure.
 
 [![PyPI](https://img.shields.io/pypi/v/antaris-router)](https://pypi.org/project/antaris-router/)
 [![Tests](https://github.com/Antaris-Analytics/antaris-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Antaris-Analytics/antaris-router/actions/workflows/tests.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
-## What's New in v4.0.0 (antaris-suite v3.0.0)
+## What's New
 
-- **SLAMonitor 24h pruning** — `_records` list bounded to 24h window; no unbounded growth in long-running agents
-- **Outcome-quality routing** — router adapts model selection based on real outcome feedback over time
-- **Confidence-gated escalation** — routes to stronger model when confidence drops below threshold
-- **ProviderHealthTracker** — bounded deques (maxlen=10,000) track latency and error rates per provider
-- **ABTest** — deterministic assignment for reproducible A/B model experiments
-
-
-
-- **SLA Monitor** — enforce cost budgets and latency targets per model/tier; `SLAConfig(max_latency_ms=..., budget_per_hour_usd=...)`, `get_sla_report()`, `check_budget_alert()`
-- **Confidence Routing** — `RoutingDecision.confidence_basis` for cross-package tracing; `ConfidenceRouter` for score-weighted decisions
+- **Provider health tracking** — `record_provider_health(provider, status, latency_ms, ttl_seconds)` with TTL-based expiry; routing automatically avoids "down" providers and de-prioritises "degraded" ones
+- **SLA 24h pruning** — `SLAMonitor._records` bounded to a 24-hour window; no unbounded memory growth in long-running agents
+- **Outcome-quality routing** — router adapts model selection based on real outcome feedback; models below quality threshold are auto-skipped
+- **Confidence-gated escalation** — routes to a stronger model when classification confidence drops below a configurable threshold
+- **ProviderHealthTracker** — bounded deques (maxlen=10,000) track latency and error rates per provider in real time
+- **A/B testing** — deterministic variant assignment for reproducible routing experiments
+- **SLA enforcement** — cost budgets, latency targets, quality floors; `SLAConfig`, `get_sla_report()`, `check_budget_alert()`
 - **Suite integration** — router hints consumed by `antaris-context` via `set_router_hints()` for adaptive context budget allocation
-- **Backward compatibility** — all SLA params optional; safe defaults throughout; existing `AdaptiveRouter` code unchanged
-- 194 tests (all passing)
+- 253 tests (all passing)
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
@@ -37,14 +33,16 @@ pip install antaris-router
 
 ---
 
-## Quick Start — AdaptiveRouter (recommended)
+## AdaptiveRouter
+
+The recommended API. Semantic classification, quality tracking, fallback chains, A/B testing, and outcome learning — all in one class.
 
 ```python
 from antaris_router import AdaptiveRouter, ModelConfig
 
 router = AdaptiveRouter("./routing_data", ab_test_rate=0.05)
 
-# Register your models with their capability ranges
+# Register models with their capability ranges
 router.register_model(ModelConfig(
     name="gpt-4o-mini",
     tier_range=("trivial", "moderate"),
@@ -77,50 +75,41 @@ router.save()
 
 ---
 
-## OpenClaw Integration
+## Provider Health Tracking
 
-antaris-router is designed for OpenClaw agent workflows. Drop it into any pipeline to get intelligent model selection without modifying your agent logic.
+Track provider status with TTL-based expiry. The router consults health state during routing to avoid down providers and de-prioritise degraded ones.
 
 ```python
 from antaris_router import Router
 
-router = Router(config_path="router.json")
-model = router.route(prompt)  # Returns the optimal model for this prompt
+router = Router(config_path="./config")
+
+# Record health status with TTL (default 300 seconds)
+router.record_provider_health("claude-sonnet", status="ok", latency_ms=45.2, ttl_seconds=300)
+router.record_provider_health("gpt-4o-mini", status="degraded", latency_ms=890.0, ttl_seconds=120)
+router.record_provider_health("claude-opus", status="down", latency_ms=0.0, ttl_seconds=60)
+
+# Query current health state (expires after TTL)
+state = router.get_provider_health_state("claude-sonnet")
+print(state)
+# → {"provider": "claude-sonnet", "status": "ok", "latency_ms": 45.2,
+#    "recorded_at": 1740100000.0, "expires_at": 1740100300.0}
+
+# Expired or unknown providers return {"status": "unknown"}
+state = router.get_provider_health_state("unknown-model")
+# → {"status": "unknown", "provider": "unknown-model"}
+
+# Health-aware routing: avoids "down", prefers "ok" over "degraded"
+decision = router.route("Summarize this document", prefer_healthy=True)
 ```
 
-Pairs naturally with antaris-guard (pre-routing safety check) and antaris-context (token budget awareness). Both are wired together automatically in **antaris-pipeline**.
+Status values: `"ok"`, `"degraded"`, `"down"`. The router also accepts event-level tracking via `record_provider_event(model, event, details, latency_ms)` for fine-grained health signals.
 
 ---
 
-## What It Does
+## SLA Enforcement
 
-- **Semantic classification** — TF-IDF vectors + cosine similarity, not keyword matching
-- **Outcome learning** — tracks routing decisions and their results, builds per-model quality profiles
-- **SLA enforcement** — cost budget alerts, latency targets, quality score tracking per model/tier
-- **Fallback chains** — automatic escalation when cheap models fail
-- **A/B testing** — routes a configurable % to premium models to validate cheap routing
-- **Context-aware** — adjusts routing based on iteration count, conversation length, user expertise
-- Runs fully offline — zero network calls, zero tokens, zero API keys
-
----
-
-## Demo
-
-```
-Prompt                                                          Tier       Model
-──────────────────────────────────────────────────────────────────────────────────
-What is 2 + 2?                                                  trivial    gpt-4o-mini
-Translate hello to French                                       trivial    gpt-4o-mini
-Write a Python function to reverse a string                     simple     gpt-4o-mini
-Implement a React component with sortable table and pagination  moderate   claude-sonnet
-Write a class that manages a connection pool with retry logic   moderate   claude-sonnet
-Design microservices for e-commerce with 10K users and CQRS     complex    claude-sonnet
-Architect a globally distributed database with CRDTs            expert     claude-opus
-```
-
----
-
-## SLA Enforcement (v3.0)
+Enforce cost budgets, latency targets, and quality floors. The SLA monitor auto-escalates or downgrades models to stay within bounds.
 
 ```python
 from antaris_router import Router, SLAConfig
@@ -143,32 +132,188 @@ result = router.route("Summarize this document", auto_scale=True)
 report = router.get_sla_report(since_hours=1.0)
 print(f"Budget used: ${report['budget_used']:.2f} / ${report['budget_limit']:.2f}")
 print(f"Avg latency: {report['avg_latency_ms']:.1f}ms")
+print(f"Compliance: {report['compliance_rate']:.0%}")
 
 # Budget alerts
 alert = router.check_budget_alert()
-if alert['triggered']:
-    print(f"⚠️ Budget alert: {alert['message']}")
+if alert['status'] != 'ok':
+    print(f"Budget alert ({alert['status']}): {alert['recommendation']}")
+```
+
+---
+
+## A/B Testing
+
+Validate routing strategies with deterministic variant assignment. Run experiments to compare cost-optimised vs quality-first routing.
+
+```python
+from antaris_router import Router
+from antaris_router.confidence import ABTest
+
+router = Router(config_path="./config")
+
+# Create an A/B test
+test = router.create_ab_test(
+    name="cost_vs_quality",
+    strategy_a="cost_optimized",
+    strategy_b="quality_first",
+    split=0.5,
+)
+
+# Pass the test to route() — variant assignment is deterministic
+decision = router.route("Write a complex algorithm", ab_test=test)
+print(f"Variant: {decision.ab_variant}")  # → "a" or "b"
+```
+
+The `AdaptiveRouter` also supports A/B testing via `ab_test_rate` — a configurable percentage of requests are routed to premium models to validate that cheap routing is working:
+
+```python
+router = AdaptiveRouter("./routing_data", ab_test_rate=0.05)
+result = router.route("Simple question")
+print(result.ab_test)  # → True on ~5% of requests
+```
+
+---
+
+## Confidence Gating
+
+When classification confidence is low, the router can escalate, fall back to a safe default, or flag the request for clarification.
+
+```python
+from antaris_router import AdaptiveRouter, ModelConfig
+
+router = AdaptiveRouter(
+    "./routing_data",
+    confidence_threshold=0.6,
+    confidence_strategy="escalate",    # or "safe_default", "clarify"
+    safe_default_model="claude-sonnet", # used with "safe_default" strategy
+)
+
+# route_with_confidence() returns a RouteDecision with strategy metadata
+decision = router.route_with_confidence("Some ambiguous request")
+print(decision.confidence)        # → 0.42
+print(decision.strategy_applied)  # → "escalated" (confidence < 0.6)
+print(decision.basis)             # → "semantic_classifier" or "composite"
+```
+
+The legacy `Router` also supports confidence-gated escalation:
+
+```python
+from antaris_router import Router
+
+router = Router(
+    low_confidence_threshold=0.5,
+    escalation_model="claude-opus",
+    escalation_strategy="always",  # or "log_only", "ask"
+)
+
+decision = router.route("Vague request")
+if decision.escalated:
+    print(f"Escalated: {decision.escalation_reason}")
+    print(f"Original confidence: {decision.original_confidence:.2f}")
 ```
 
 ---
 
 ## Outcome Learning
 
-The router gets smarter over time. When a cheap model consistently fails on a task type, the router learns to skip it.
+The router gets smarter over time. Report outcomes to build per-model per-tier quality profiles.
 
 ```python
-# Report failures — router learns to escalate this task type
+result = router.route("Implement retry logic with exponential backoff")
+
+# After using the model, report the outcome
+router.report_outcome(result.prompt_hash, quality_score=0.9, success=True)
+
+# Report failures — router learns to skip this model for this task type
 router.report_outcome(result.prompt_hash, quality_score=0.15, success=False)
-# ... repeat a few times ...
-# Router automatically routes this task type to a better model
 ```
 
 Quality scores per model per tier:
 ```
-score = 0.4 × success_rate + 0.4 × avg_quality + 0.2 × (1 - escalation_rate)
+score = 0.4 * success_rate + 0.4 * avg_quality + 0.2 * (1 - escalation_rate)
 ```
 
 Models below the escalation threshold (default 0.30) are automatically skipped.
+
+---
+
+## Cost Tracking
+
+Track actual token usage, generate cost reports, and forecast future spend.
+
+```python
+from antaris_router import Router
+
+router = Router(config_path="./config", enable_cost_tracking=True)
+
+decision = router.route("Explain quantum computing")
+
+# Log actual usage after model call
+actual_cost = router.log_usage(decision, input_tokens=150, output_tokens=500)
+
+# Cost report
+report = router.cost_report(period="week")
+
+# Savings estimate vs always using a premium model
+savings = router.savings_estimate(comparison_model="gpt-4o")
+
+# Cost forecasting
+forecast = router.forecast_cost(
+    requests_per_hour=100,
+    avg_input_tokens=200,
+    avg_output_tokens=400,
+)
+print(f"Projected daily cost: ${forecast['daily_cost_usd']:.2f}")
+print(f"Tip: {forecast['optimization_tip']}")
+
+# Cost optimization suggestions
+optimizations = router.get_cost_optimizations()
+for opt in optimizations:
+    print(f"{opt['suggestion']} — saves ${opt['estimated_savings_usd_per_day']:.2f}/day")
+```
+
+---
+
+## Suite Integration — `set_router_hints()`
+
+antaris-router publishes routing decisions that `antaris-context` consumes via `set_router_hints()` for adaptive context budget allocation. The router tells the context manager which model was selected, its tier, and cost profile — so context windows are sized appropriately.
+
+```python
+from antaris_router import AdaptiveRouter, ModelConfig
+# antaris-context reads router hints for budget allocation
+# from antaris_context import set_router_hints
+
+router = AdaptiveRouter("./routing_data")
+router.register_model(ModelConfig(
+    name="claude-sonnet",
+    tier_range=("simple", "complex"),
+    cost_per_1k_input=0.003,
+    cost_per_1k_output=0.015,
+))
+
+result = router.route("Build a REST API with authentication")
+
+# Pass routing decision to antaris-context for budget-aware context sizing
+# set_router_hints(model=result.model, tier=result.tier, confidence=result.confidence)
+```
+
+This pairing is wired automatically in **antaris-pipeline**.
+
+---
+
+## OpenClaw Integration
+
+antaris-router is designed for OpenClaw agent workflows. Drop it into any pipeline to get intelligent model selection without modifying your agent logic.
+
+```python
+from antaris_router import Router
+
+router = Router(config_path="router.json")
+model = router.route(prompt)  # Returns the optimal model for this prompt
+```
+
+Pairs naturally with antaris-guard (pre-routing safety check) and antaris-context (token budget awareness).
 
 ---
 
@@ -188,6 +333,9 @@ result = router.route("What do you think?", context={"conversation_length": 15})
 
 # Expert user — don't waste time with weak models
 result = router.route("Optimize this", context={"user_expertise": "expert"})
+
+# High urgency — boost tier
+result = router.route("Fix production outage", context={"urgency": "high"})
 ```
 
 ---
@@ -229,17 +377,6 @@ router.teach(
 
 ---
 
-## Routing Analytics
-
-```python
-analytics = router.routing_analytics()
-print(f"Total decisions: {analytics['total_decisions']}")
-print(f"Tier distribution: {analytics['tier_distribution']}")
-print(f"Cost saved vs all-premium: ${analytics['cost_savings']:.2f}")
-```
-
----
-
 ## Works With Local Models (Ollama)
 
 ```python
@@ -262,6 +399,22 @@ router.register_model(ModelConfig(
 40% of typical requests route to local models ($0.00). At 1,000 requests/day, that's ~$10.80/day vs ~$18.00/day all-Sonnet.
 
 The router doesn't call models — it tells you which one to use. Wire it to Ollama's API, LiteLLM, or any client you prefer.
+
+---
+
+## Demo
+
+```
+Prompt                                                          Tier       Model
+──────────────────────────────────────────────────────────────────────────────────
+What is 2 + 2?                                                  trivial    gpt-4o-mini
+Translate hello to French                                       trivial    gpt-4o-mini
+Write a Python function to reverse a string                     simple     gpt-4o-mini
+Implement a React component with sortable table and pagination  moderate   claude-sonnet
+Write a class that manages a connection pool with retry logic   moderate   claude-sonnet
+Design microservices for e-commerce with 10K users and CQRS     complex    claude-sonnet
+Architect a globally distributed database with CRDTs            expert     claude-opus
+```
 
 ---
 
@@ -295,22 +448,26 @@ Plain JSON. Inspect or edit with any text editor.
 ## Architecture
 
 ```
-AdaptiveRouter (v2/v3 — recommended)
+AdaptiveRouter (recommended)
 ├── SemanticClassifier
 │   └── TFIDFVectorizer     — Term weighting + cosine similarity
 ├── QualityTracker
 │   ├── RoutingDecision     — Decision + outcome records
 │   └── ModelProfiles       — Per-model per-tier quality scores
-├── ContextAdjuster         — Iteration, conversation, expertise signals
+├── ContextAdjuster         — Iteration, conversation, expertise, urgency signals
 ├── FallbackChain           — Ordered model escalation
+├── ConfidenceGating        — Escalate / safe_default / clarify strategies
 └── ABTester                — Validation routing (configurable %)
 
-Router (v1/v3 with SLA — legacy keyword-based)
+Router (legacy keyword-based, with SLA + health)
 ├── TaskClassifier          — Keyword-based + structural classification
 ├── ModelRegistry           — Model capabilities and cost data
-├── CostTracker             — Usage records, savings analysis
-├── SLAMonitor              — Budget alerts, latency enforcement
-└── ConfidenceRouter        — Score-weighted routing decisions
+├── CostTracker             — Usage records, savings analysis, forecasting
+├── SLAMonitor              — Budget alerts, latency enforcement, 24h pruning
+├── ProviderHealthTracker   — Bounded deques, real-time error/latency tracking
+├── ProviderHealthState     — TTL-based explicit status (ok/degraded/down)
+├── ConfidenceRouter        — Score-weighted routing with escalation strategies
+└── ABTest                  — Deterministic variant assignment
 ```
 
 ---
@@ -337,12 +494,24 @@ Measured on Apple M4, Python 3.14.
 
 ---
 
+## Routing Analytics
+
+```python
+analytics = router.routing_analytics()
+print(f"Total decisions: {analytics['total_decisions']}")
+print(f"Tier distribution: {analytics['tier_distribution']}")
+print(f"Most used model: {analytics['most_used_model']}")
+print(f"Avg confidence: {analytics['avg_confidence']:.3f}")
+```
+
+---
+
 ## Legacy API
 
 The v1 keyword-based router is still available and fully supported:
 
 ```python
-from antaris_router import Router  # v1 API (now with v3 SLA features)
+from antaris_router import Router  # v1 API (with SLA + health features)
 router = Router(config_path="./config")
 decision = router.route("What's 2+2?")
 ```
@@ -360,7 +529,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-All 194 tests pass with zero external dependencies.
+All 253 tests pass with zero external dependencies.
 
 ---
 
@@ -379,5 +548,5 @@ Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Built with ❤️ by Antaris Analytics**  
+**Built with love by Antaris Analytics**
 *Deterministic infrastructure for AI agents*
