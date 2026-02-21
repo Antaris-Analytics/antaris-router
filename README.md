@@ -9,7 +9,15 @@ Routes prompts to the cheapest capable model using semantic classification (TF-I
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
-## What's New in v3.0.0
+## What's New in v3.3.0 (antaris-suite 3.0)
+
+- **SLAMonitor 24h pruning** — `_records` list bounded to 24h window; no unbounded growth in long-running agents
+- **Outcome-quality routing** — router adapts model selection based on real outcome feedback over time
+- **Confidence-gated escalation** — routes to stronger model when confidence drops below threshold
+- **ProviderHealthTracker** — bounded deques (maxlen=10,000) track latency and error rates per provider
+- **ABTest** — deterministic assignment for reproducible A/B model experiments
+
+
 
 - **SLA Monitor** — enforce cost budgets and latency targets per model/tier; `SLAConfig(max_latency_ms=..., budget_per_hour_usd=...)`, `get_sla_report()`, `check_budget_alert()`
 - **Confidence Routing** — `RoutingDecision.confidence_basis` for cross-package tracing; `ConfidenceRouter` for score-weighted decisions
