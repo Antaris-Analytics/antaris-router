@@ -9,7 +9,7 @@ Routes prompts to the cheapest capable model using semantic classification (TF-I
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-orange.svg)](LICENSE)
 
-## What's New in v3.3.0 (antaris-suite 3.0)
+## What's New in v4.0.0 (antaris-suite v3.0.0)
 
 - **SLAMonitor 24h pruning** — `_records` list bounded to 24h window; no unbounded growth in long-running agents
 - **Outcome-quality routing** — router adapts model selection based on real outcome feedback over time
@@ -364,13 +364,14 @@ All 194 tests pass with zero external dependencies.
 
 ---
 
-## Part of the Antaris Analytics Suite
+## Part of the Antaris Analytics Suite — v3.0.0
 
 - **[antaris-memory](https://pypi.org/project/antaris-memory/)** — Persistent memory for AI agents
 - **antaris-router** — Adaptive model routing with SLA enforcement (this package)
 - **[antaris-guard](https://pypi.org/project/antaris-guard/)** — Security and prompt injection detection
 - **[antaris-context](https://pypi.org/project/antaris-context/)** — Context window optimization
 - **[antaris-pipeline](https://pypi.org/project/antaris-pipeline/)** — Agent orchestration pipeline
+- **[antaris-contracts](https://pypi.org/project/antaris-contracts/)** — Versioned schemas, failure semantics, and debug CLI
 
 ## License
 
