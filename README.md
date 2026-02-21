@@ -191,8 +191,19 @@ result = router.route("Write unit tests for authentication")
 print(result.model)           # → gpt-4o-mini
 print(result.fallback_chain)  # → ['claude-sonnet', 'claude-opus']
 
-next_model = router.escalate(result.prompt_hash)
-print(next_model)  # → claude-sonnet
+# escalate() distinguishes two outcomes:
+#   KeyError → hash not in tracker (process restarted, tracker rotated)
+#              re-route from scratch rather than escalating
+#   None     → hash found, but all fallback tiers are exhausted
+#   str      → next model to try
+try:
+    next_model = router.escalate(result.prompt_hash)
+    if next_model is None:
+        print("All fallbacks exhausted — surface error to user")
+    else:
+        print(next_model)  # → claude-sonnet
+except KeyError:
+    print("Decision not tracked — re-route from scratch")
 ```
 
 ---

@@ -244,6 +244,10 @@ class SLAMonitor:
             baseline_cost_usd=baseline_cost_usd,
         )
         self._records.append(record)
+        # Prune records older than 24 h to prevent unbounded list growth in
+        # long-running agent processes (OOM blocker — Gemini R1).
+        cutoff = time.time() - 86_400
+        self._records = [r for r in self._records if r.timestamp >= cutoff]
         return record
 
     # ── Spend helpers ─────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ based on deterministic keyword matching, length, and structural analysis.
 """
 
 import re
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
 
 from .config import Config
@@ -18,7 +18,7 @@ class ClassificationResult:
     tier: str
     confidence: float
     reasoning: List[str]
-    signals: Dict[str, any]
+    signals: Dict[str, Any]
 
 
 class TaskClassifier:

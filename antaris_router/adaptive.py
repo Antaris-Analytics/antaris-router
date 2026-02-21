@@ -575,17 +575,29 @@ class AdaptiveRouter:
     # ── Sprint 2.3 private helpers ─────────────────────────────────────────
 
     def _determine_basis(self, result: "RoutingResult") -> str:
-        """Choose the confidence basis label for a RoutingResult."""
-        has_quality_data = any(
+        """Choose the confidence basis label for a RoutingResult.
+
+        Returns COMPOSITE when the tracker has accumulated quality data for
+        this model (i.e. the default 0.5 score has been displaced by real
+        outcomes), SEMANTIC otherwise.
+
+        Called after a routing decision is made (post-classification), so
+        quality data from prior turns is already available.
+        """
+        has_quality_data = (
             self.tracker.get_model_score(result.model, result.tier) != 0.5
-            for _ in [1]  # single-iteration to call once
         )
         if has_quality_data:
             return CONFIDENCE_BASIS_COMPOSITE
         return CONFIDENCE_BASIS_SEMANTIC
 
     def _determine_basis_from_classification(self, classification: "SemanticResult") -> str:
-        """Choose the confidence basis from a raw SemanticResult."""
+        """Choose the confidence basis from a raw SemanticResult.
+
+        Always returns SEMANTIC — this method is called at classification time,
+        before any quality data has been consulted. COMPOSITE is only possible
+        post-decision (see _determine_basis, which checks the quality tracker).
+        """
         return CONFIDENCE_BASIS_SEMANTIC
 
     def _escalate_model(self, current_model: str, current_tier: str) -> Optional[str]:
@@ -624,18 +636,30 @@ class AdaptiveRouter:
 
     def escalate(self, prompt_hash: str) -> Optional[str]:
         """Escalate a failed routing to the next model in the fallback chain.
-        
-        Records the escalation and returns the next model to try.
-        
+
+        Distinguishes between two distinct outcomes:
+        - ``KeyError``: *prompt_hash* was not found in the decision tracker.
+          This happens when the tracker was rotated, the process restarted,
+          or the hash came from a previous session.  The caller should treat
+          this as "decision not tracked" and re-route from scratch.
+        - ``None`` return: the hash was found but no higher-tier fallback is
+          available.  All escalation paths are exhausted — raise an error or
+          surface to the user.
+
         Args:
-            prompt_hash: The prompt_hash from the original routing
-            
+            prompt_hash: The prompt_hash from the original RoutingResult.
+
         Returns:
-            Next model name, or None if no fallbacks remain
+            Next model name, or None if no fallbacks remain.
+
+        Raises:
+            KeyError: If prompt_hash is not found in the decision tracker.
         """
-        # Find the original decision
+        # Search for the original decision, most-recent first.
+        decision_found = False
         for decision in reversed(self.tracker.decisions):
             if decision['prompt_hash'] == prompt_hash:
+                decision_found = True
                 decision['escalated'] = True
                 current_model = decision['model']
                 tier = decision['tier']
@@ -654,8 +678,16 @@ class AdaptiveRouter:
                                 max_tier = TIER_ORDER.get(config.tier_range[1], 4)
                                 if min_tier <= TIER_ORDER[higher_tier] <= max_tier:
                                     return model_name
-                break
+                break  # hash found — stop searching even if no fallback
 
+        if not decision_found:
+            raise KeyError(
+                f"escalate(): prompt_hash {prompt_hash!r} not found in decision "
+                "tracker. The tracker may have been rotated or the process "
+                "restarted. Re-route from scratch instead of escalating."
+            )
+
+        # Hash was found, but all fallback models are exhausted.
         return None
 
     def teach(self, prompt: str, correct_tier: str):
@@ -672,49 +704,57 @@ class AdaptiveRouter:
 
     def _adjust_for_context(self, tier: str, context: Dict) -> Tuple[str, str]:
         """Adjust tier based on conversation context.
-        
+
+        Multiple boosts CAN stack intentionally — a high-urgency request on
+        the third iteration is genuinely harder than either signal alone.
+        All active reasons are accumulated and returned so callers can audit
+        exactly why a tier was boosted (and by how many steps).
+
         Args:
-            tier: Current tier from classifier
+            tier: Current tier from classifier.
             context: Context dict with optional keys:
-                - iteration: How many times this has been attempted
-                - conversation_length: Number of prior messages
-                - user_expertise: "beginner", "intermediate", "expert"
-                - urgency: "low", "normal", "high"
-                
+                - iteration: How many times this has been attempted (int).
+                - conversation_length: Number of prior messages (int).
+                - user_expertise: "beginner", "intermediate", or "expert".
+                - urgency: "low", "normal", or "high".
+
         Returns:
-            Tuple of (adjusted_tier, reasoning_string)
+            Tuple of (adjusted_tier, reasoning_string) where reasoning_string
+            is a semicolon-separated list of all reasons that fired.
         """
         tier_idx = TIER_ORDER.get(tier, 2)
-        reason = ""
-        
+        reasons = []
+
         # Multiple iterations → escalate (user is struggling)
         iteration = context.get('iteration', 1)
         if iteration >= 3:
             tier_idx = min(tier_idx + 1, 4)
-            reason = f"Iteration {iteration}: escalating tier"
-        
+            reasons.append(f"iteration {iteration}: escalating tier")
+
         # Long conversation → probably complex
         conv_len = context.get('conversation_length', 0)
         if conv_len > 10 and tier_idx < 2:
             tier_idx = 2
-            reason = f"Long conversation ({conv_len} msgs): minimum moderate"
-        
+            reasons.append(f"long conversation ({conv_len} msgs): minimum moderate")
+
         # User expertise affects routing
         expertise = context.get('user_expertise', 'intermediate')
         if expertise == 'expert' and tier_idx < 2:
             tier_idx = max(tier_idx, 2)
-            reason = "Expert user: minimum moderate tier"
-        
-        # Urgency boost
+            reasons.append("expert user: minimum moderate tier")
+
+        # Urgency boost — intentionally independent of the iteration boost.
+        # Both can fire on the same request; the combined +2 is the correct
+        # behavior for a high-urgency repeated failure.
         if context.get('urgency') == 'high':
             tier_idx = min(tier_idx + 1, 4)
-            reason = "High urgency: escalating tier"
-        
-        # Convert back to tier name
+            reasons.append("high urgency: escalating tier")
+
         idx_to_tier = {v: k for k, v in TIER_ORDER.items()}
         new_tier = idx_to_tier.get(tier_idx, tier)
-        
-        return new_tier, reason
+        reason_str = "; ".join(reasons) if reasons else ""
+
+        return new_tier, reason_str
 
     def _eligible_models(self, tier: str) -> List[str]:
         """Get models eligible for a given tier."""
