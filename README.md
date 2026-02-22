@@ -12,6 +12,12 @@
 - **Cost Tracking & Reporting** — Per-model cost attribution. A/B test routing strategies.
 - **Zero Infrastructure** — All state in JSON files. No vector DB, no external dependencies, no API keys.
 
+## Phase 4 Roadmap
+
+**v4.2:** Discord context as routing signal (conversation history informs task classification)  
+**v4.3:** Self-improving routing (learn from outcome quality, not just cost)  
+**v4.4+:** Multi-provider optimization (manage cost/latency across OpenAI, Anthropic, Google, local models)
+
 Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. Enforces cost/latency SLAs. Provider health tracking with TTL-based status. A/B testing for routing strategy validation. All state stored in plain JSON files. No API keys, no vector database, no infrastructure.
 
 [![PyPI](https://img.shields.io/pypi/v/antaris-router)](https://pypi.org/project/antaris-router/)
