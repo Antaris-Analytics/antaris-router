@@ -2,6 +2,16 @@
 
 **Adaptive model router for LLM cost optimization. Learns from outcomes. Zero dependencies.**
 
+**v4.1.0** — SLA enforcement • Outcome-based learning • Cost tracking • 13 source files • 253 tests**
+
+## What's New in v4.1.0
+
+- **SLA Enforcement** — Set latency/cost targets per route. Router automatically escalates to faster models when SLA is at risk. Proven on multi-billion-token workloads.
+- **Outcome Learning** — Routes improve over time. Track which models actually nail which task types (not just cost, but quality).
+- **Provider Health Tracking** — TTL-based status for provider outages. Automatic fallback to backup chains.
+- **Cost Tracking & Reporting** — Per-model cost attribution. A/B test routing strategies.
+- **Zero Infrastructure** — All state in JSON files. No vector DB, no external dependencies, no API keys.
+
 Routes prompts to the cheapest capable model using semantic classification (TF-IDF), not keyword matching. Tracks outcomes to learn which models actually perform well on which tasks. Enforces cost/latency SLAs. Provider health tracking with TTL-based status. A/B testing for routing strategy validation. All state stored in plain JSON files. No API keys, no vector database, no infrastructure.
 
 [![PyPI](https://img.shields.io/pypi/v/antaris-router)](https://pypi.org/project/antaris-router/)
